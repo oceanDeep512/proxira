@@ -16,7 +16,7 @@
     "start:cli": "pnpm --filter ./apps/getway start:cli"
   },
   "keywords": [],
-  "author": "",
+  "author": "oceandeep512",
   "license": "MIT",
   "packageManager": "pnpm@10.12.4"
 }

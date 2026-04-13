@@ -98,6 +98,8 @@ body {
 .status-group {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -124,22 +126,6 @@ body {
   border-color: color-mix(in srgb, var(--error) 35%, var(--line));
 }
 
-.controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  gap: 10px;
-}
-
-.control-card {
-  padding: 10px 12px;
-}
-
-.control-card.compact {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-}
-
 .section-title {
   margin: 0;
   font-size: 14px;
@@ -152,13 +138,6 @@ body {
   margin: 0;
   color: var(--text-soft);
   font-size: 11px;
-}
-
-.control-row {
-  margin-top: 8px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px;
 }
 
 .input {
@@ -209,10 +188,39 @@ body {
   border-color: var(--line);
 }
 
-.hint {
-  margin: 6px 0 0;
-  font-size: 11px;
-  color: var(--text-soft);
+.button-danger {
+  border-color: color-mix(in srgb, var(--error) 55%, var(--line));
+  background: color-mix(in srgb, var(--error) 14%, var(--panel));
+  color: color-mix(in srgb, var(--error) 85%, var(--text));
+}
+
+.button-danger:hover {
+  border-color: color-mix(in srgb, var(--error) 70%, var(--line));
+  background: color-mix(in srgb, var(--error) 18%, var(--panel));
+}
+
+.action-zone {
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.action-zone-head {
+  display: grid;
+  gap: 4px;
+}
+
+.action-zone-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) repeat(4, auto);
+  gap: 8px;
+  align-items: center;
+}
+
+.action-group-picker {
+  width: 100%;
+  max-width: 420px;
+  justify-self: start;
 }
 
 .workspace {
@@ -235,6 +243,41 @@ body {
   padding: 10px;
   min-height: 0;
   overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.detail-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-toolbar-info {
+  min-width: 0;
+}
+
+.detail-toolbar-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.detail-toolbar-value {
+  margin: 3px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.detail-toolbar-target {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-soft);
 }
 
 .panel-head {
@@ -254,6 +297,17 @@ body {
   min-height: 28px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.panel-button-danger {
+  border-color: color-mix(in srgb, var(--error) 45%, var(--line));
+  color: color-mix(in srgb, var(--error) 85%, var(--text));
+  background: color-mix(in srgb, var(--error) 10%, var(--panel));
+}
+
+.panel-button-danger:hover {
+  border-color: color-mix(in srgb, var(--error) 65%, var(--line));
+  color: color-mix(in srgb, var(--error) 90%, var(--text));
 }
 
 .empty {
@@ -553,8 +607,8 @@ body {
 }
 
 @media (max-width: 1080px) {
-  .controls {
-    grid-template-columns: 1fr;
+  .action-zone-controls {
+    grid-template-columns: minmax(220px, 360px) repeat(2, auto);
   }
 
   .workspace {
@@ -566,7 +620,7 @@ body {
   .dashboard {
     padding: 10px 8px 12px;
     min-height: auto;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
   }
 
   .topbar {
@@ -580,11 +634,22 @@ body {
     flex-wrap: wrap;
   }
 
-  .control-row {
+  .action-zone-controls {
     grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
-  .button {
+  .detail-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .action-group-picker {
+    width: 100%;
+  }
+
+  .panel-button {
+    min-height: 34px;
     width: 100%;
   }
 

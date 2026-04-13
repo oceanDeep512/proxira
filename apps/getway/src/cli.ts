@@ -2,11 +2,13 @@
 import boxen from "boxen";
 import chalk from "chalk";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdir, rm } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROXIRA_LOGO_LINES } from "./logo.js";
 
 type CliFlags = {
+  mode: "serve" | "clear-cache";
   help: boolean;
   version: boolean;
   noBanner: boolean;
@@ -39,6 +41,7 @@ const printHelp = (): void => {
     "",
     `${chalk.bold("用法")}`,
     "  proxira [options]",
+    "  proxira clear-cache [options]",
     "",
     `${chalk.bold("参数说明")}`,
     "  -p, --port <port>          代理服务端口，默认 3000",
@@ -47,6 +50,9 @@ const printHelp = (): void => {
     "      --no-banner            关闭启动 Banner 输出",
     "  -h, --help                 查看帮助信息",
     "  -v, --version              查看当前 CLI 版本",
+    "",
+    `${chalk.bold("子命令")}`,
+    "  clear-cache                清除本地缓存（配置 + 历史记录）",
     "",
     `${chalk.bold("参数传递方式")}`,
     "  --port 3010                使用空格传值",
@@ -58,6 +64,8 @@ const printHelp = (): void => {
     "  proxira --port 3010 --target http://localhost:8080",
     "  proxira --port=3010 --target=http://localhost:8080",
     "  proxira -p 3001 -d ./.proxira",
+    "  proxira clear-cache",
+    "  proxira clear-cache --data-dir ./.proxira",
   ].join("\n");
 
   console.log(
@@ -70,11 +78,24 @@ const printHelp = (): void => {
 };
 
 const parseFlags = (argv: string[]): CliFlags => {
-  const normalized = argv.filter((token) => token !== "--");
+  const normalizedInput = argv.filter((token) => token !== "--");
   const flags: CliFlags = {
+    mode: "serve",
     help: false,
     version: false,
     noBanner: false,
+  };
+
+  const normalized =
+    normalizedInput[0] === "clear-cache" ? normalizedInput.slice(1) : normalizedInput;
+  if (normalizedInput[0] === "clear-cache") {
+    flags.mode = "clear-cache";
+  }
+
+  const ensureServeOnly = (token: string): void => {
+    if (flags.mode === "clear-cache") {
+      throw new Error(`参数 ${token} 仅可用于启动代理服务`);
+    }
   };
 
   const readNext = (index: number, key: string): string => {
@@ -100,24 +121,29 @@ const parseFlags = (argv: string[]): CliFlags => {
       continue;
     }
     if (token === "--no-banner") {
+      ensureServeOnly(token);
       flags.noBanner = true;
       continue;
     }
     if (token === "-p" || token === "--port") {
+      ensureServeOnly(token);
       flags.port = readNext(index, token);
       index += 1;
       continue;
     }
     if (token.startsWith("--port=")) {
+      ensureServeOnly("--port");
       flags.port = token.slice("--port=".length);
       continue;
     }
     if (token === "-t" || token === "--target") {
+      ensureServeOnly(token);
       flags.target = readNext(index, token);
       index += 1;
       continue;
     }
     if (token.startsWith("--target=")) {
+      ensureServeOnly("--target");
       flags.target = token.slice("--target=".length);
       continue;
     }
@@ -137,6 +163,17 @@ const parseFlags = (argv: string[]): CliFlags => {
   return flags;
 };
 
+const resolveDataDir = (dataDirRaw?: string): string => {
+  return resolve(dataDirRaw?.trim() || join(process.cwd(), ".proxira"));
+};
+
+const clearLocalCache = async (dataDirRaw?: string): Promise<void> => {
+  const dataDir = resolveDataDir(dataDirRaw);
+  await rm(dataDir, { recursive: true, force: true });
+  await mkdir(dataDir, { recursive: true });
+  console.log(chalk.green(`[proxira] 本地缓存已清除：${dataDir}`));
+};
+
 const run = async (): Promise<void> => {
   try {
     const flags = parseFlags(process.argv.slice(2));
@@ -147,6 +184,10 @@ const run = async (): Promise<void> => {
     }
     if (flags.version) {
       console.log(CLI_VERSION);
+      return;
+    }
+    if (flags.mode === "clear-cache") {
+      await clearLocalCache(flags.dataDir);
       return;
     }
 

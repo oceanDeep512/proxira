@@ -14,6 +14,7 @@ Proxira 是一个轻量化请求转发工具，主要用于本地开发联调。
 - 请求透明转发（path / query / header / cookie / body）
 - Web 面板实时展示请求记录
 - SSE 实时推送最新请求
+- 支持多分组：每个分组绑定独立上游地址和请求历史
 - 历史请求支持一键导出 JSON
 - 详情支持一键复制 URL / Headers / Body / cURL
 - 支持按记录查看、删除、清空
@@ -61,25 +62,28 @@ npx proxira --port 3010 --target http://localhost:8080
 1. 让你的 SDK/应用请求指向 Proxira 端口（例如 `http://localhost:3000`）。
 2. 打开管理面板查看实时请求列表。
 3. 在详情区检查 Query / Headers / Body / Response。
-4. 需要切换上游时，在面板里修改“真实转发地址”并保存。
+4. 需要并行联调多个环境时，新建分组并切换到对应分组。
+5. 需要切换上游时，在当前分组里修改“真实转发地址”并保存。
 
 ## 管理接口一览
 
 - `GET /_proxira/api/health`：健康检查
 - `GET /_proxira/api/status`：服务状态（启动时间、连接数、记录数）
-- `GET /_proxira/api/config`：获取当前上游配置
-- `PUT /_proxira/api/config`：更新上游配置
-- `GET /_proxira/api/records`：分页查询记录
-- `GET /_proxira/api/records/export`：导出当前记录为 JSON
-- `GET /_proxira/api/records/:id`：查看单条记录
-- `DELETE /_proxira/api/records/:id`：删除单条记录
-- `DELETE /_proxira/api/records`：清空记录
+- `GET /_proxira/api/config`：获取分组配置（包含当前激活分组）
+- `PUT /_proxira/api/config`：切换激活分组或更新当前分组上游地址
+- `POST /_proxira/api/groups`：创建分组（默认创建后切换到新分组）
+- `PUT /_proxira/api/groups/:id`：编辑分组标题/上游地址（可选设为激活）
+- `GET /_proxira/api/records`：分页查询记录（支持 `groupId` 查询参数）
+- `GET /_proxira/api/records/export`：导出当前分组记录为 JSON（支持 `groupId`）
+- `GET /_proxira/api/records/:id`：查看单条记录（支持 `groupId`）
+- `DELETE /_proxira/api/records/:id`：删除单条记录（支持 `groupId`）
+- `DELETE /_proxira/api/records`：清空记录（支持 `groupId`）
 - `GET /_proxira/api/events`：SSE 实时事件流
 
 ## 环境变量
 
 - `PORT`：服务端口（默认 `3000`）
-- `PROXY_TARGET_URL`：默认上游地址（默认 `http://localhost:8080`）
+- `PROXY_TARGET_URL`：初始默认分组的上游地址（默认 `http://localhost:8080`）
 - `PROXY_DATA_DIR`：配置文件存储目录（默认 `./.proxira`）
 - `PROXY_BODY_LIMIT`：记录体截断大小（默认 `32768` 字节）
 - `PROXY_HISTORY_LIMIT`：内存历史记录上限（默认 `1000`）

@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import JsonPretty from "vue-json-pretty";
+import GroupPicker from "./components/GroupPicker.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
+import GroupFormModal from "./components/GroupFormModal.vue";
+import ToastMessages from "./components/ToastMessages.vue";
 import type {
   ProxyConfig,
+  ProxyGroup,
   ProxyHeaders,
   ProxyPayloadBody,
   ProxyRecordsExportResponse,
@@ -14,16 +19,28 @@ import type {
 const apiBase =
   (import.meta.env.VITE_PROXY_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
 
-const targetBaseUrl = ref("");
 const records = ref<ProxyTrafficRecord[]>([]);
+const groups = ref<ProxyGroup[]>([]);
+const activeGroupId = ref("");
 const selectedRecordId = ref<string | null>(null);
 const deletingRecordId = ref<string | null>(null);
 const connectionState = ref<"connecting" | "open" | "closed">("connecting");
-const saving = ref(false);
 const exporting = ref(false);
-const message = ref("");
+const clearingRecords = ref(false);
+const resettingAll = ref(false);
+const groupModalOpen = ref(false);
+const groupModalMode = ref<"create" | "edit">("create");
+const groupModalSubmitting = ref(false);
+const modalGroupName = ref("");
+const modalTargetBaseUrl = ref("");
+const deleteGroupModalOpen = ref(false);
+const deleteGroupSubmitting = ref(false);
+const pendingDeleteGroup = ref<ProxyGroup | null>(null);
+const toastMessages = ref<Array<{ id: number; text: string; level: "success" | "error" | "info" }>>([]);
 
 let events: EventSource | null = null;
+let toastId = 0;
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 type BodyView = {
   mode: "empty" | "binary" | "json" | "text";
@@ -45,12 +62,28 @@ const selectedRecord = computed(() => {
   return records.value.find((record) => record.id === selectedRecordId.value) ?? records.value[0];
 });
 
+const activeGroup = computed(() => {
+  if (!activeGroupId.value) {
+    return groups.value[0] ?? null;
+  }
+  return groups.value.find((group) => group.id === activeGroupId.value) ?? groups.value[0] ?? null;
+});
+
+const currentGroupId = computed(() => activeGroup.value?.id ?? "");
 const recordsCountLabel = computed(() => `${records.value.length} 条`);
+const groupsCountLabel = computed(() => `${groups.value.length} 组`);
 const connectionLabel = computed(() => {
   if (connectionState.value === "open") return "SSE 已连接";
   if (connectionState.value === "connecting") return "SSE 连接中";
   return "SSE 已断开";
 });
+const modalTitle = computed(() => (groupModalMode.value === "create" ? "新增分组" : "编辑当前分组"));
+const modalDesc = computed(() =>
+  groupModalMode.value === "create"
+    ? "请输入新分组的名称和唯一转发地址。"
+    : "修改当前分组的名称与转发地址，地址仍需保持唯一。",
+);
+const modalSubmitText = computed(() => (groupModalMode.value === "create" ? "创建并切换" : "保存分组"));
 
 const detailStatusLabel = computed(() => {
   if (!selectedRecord.value) {
@@ -58,6 +91,32 @@ const detailStatusLabel = computed(() => {
   }
   return selectedRecord.value.responseStatus ?? "ERR";
 });
+
+const normalizeTargetInput = (value: string): string | null => {
+  const source = value.trim();
+  if (!source) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(source);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+};
+
+const isTargetDuplicated = (normalizedTarget: string, ignoreGroupId?: string): boolean => {
+  return groups.value.some((group) => {
+    if (ignoreGroupId && group.id === ignoreGroupId) {
+      return false;
+    }
+    return group.targetBaseUrl === normalizedTarget;
+  });
+};
 
 const safeParseJson = (text: string): unknown | null => {
   try {
@@ -155,22 +214,64 @@ const buildCurlCommand = (record: ProxyTrafficRecord): string => {
   return commandParts.join(" ");
 };
 
+const withGroupQuery = (path: string): string => {
+  const groupId = currentGroupId.value;
+  if (!groupId) {
+    return `${apiBase}${path}`;
+  }
+  const separator = path.includes("?") ? "&" : "?";
+  return `${apiBase}${path}${separator}groupId=${encodeURIComponent(groupId)}`;
+};
+
+const dismissToast = (id: number): void => {
+  const timer = toastTimers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    toastTimers.delete(id);
+  }
+  toastMessages.value = toastMessages.value.filter((item) => item.id !== id);
+};
+
+const pushToast = (text: string, level: "success" | "error" | "info" = "info"): void => {
+  const id = ++toastId;
+  toastMessages.value = [...toastMessages.value, { id, text, level }];
+  const timer = setTimeout(() => {
+    dismissToast(id);
+  }, 2800);
+  toastTimers.set(id, timer);
+};
+
+const extractErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  try {
+    const payload = (await response.json()) as { message?: string };
+    if (payload?.message) {
+      return payload.message;
+    }
+  } catch {
+    // Ignore JSON parsing errors.
+  }
+  return fallback;
+};
+
 const copyText = async (label: string, text: string): Promise<void> => {
   if (!text) {
-    message.value = `${label} 为空`;
+    pushToast(`${label} 为空`, "info");
     return;
   }
 
   try {
     await navigator.clipboard.writeText(text);
-    message.value = `已复制 ${label}`;
+    pushToast(`已复制 ${label}`, "success");
   } catch {
-    message.value = `复制 ${label} 失败，请检查浏览器权限`;
+    pushToast(`复制 ${label} 失败，请检查浏览器权限`, "error");
   }
 };
 
 const syncConfig = (config: ProxyConfig): void => {
-  targetBaseUrl.value = config.targetBaseUrl;
+  groups.value = config.groups;
+  const matchedGroup =
+    config.groups.find((group) => group.id === config.activeGroupId) ?? config.groups[0] ?? null;
+  activeGroupId.value = matchedGroup?.id ?? "";
 };
 
 const pushRecord = (record: ProxyTrafficRecord): void => {
@@ -197,21 +298,37 @@ const removeRecordLocal = (recordId: string): void => {
 
 const applySseEvent = (event: ProxySseEvent): void => {
   if (event.type === "snapshot" || event.type === "config") {
+    const previousGroupId = currentGroupId.value;
     syncConfig(event.config);
+    const nextGroupId = currentGroupId.value;
+    if (previousGroupId !== nextGroupId) {
+      void fetchRecords().catch((error) => {
+        pushToast(error instanceof Error ? error.message : "加载历史记录失败", "error");
+      });
+    }
     return;
   }
 
   if (event.type === "record") {
+    if (event.groupId !== currentGroupId.value) {
+      return;
+    }
     pushRecord(event.record);
     return;
   }
 
   if (event.type === "record_deleted") {
+    if (event.groupId !== currentGroupId.value) {
+      return;
+    }
     removeRecordLocal(event.id);
     return;
   }
 
   if (event.type === "records_cleared") {
+    if (event.groupId !== currentGroupId.value) {
+      return;
+    }
     records.value = [];
     selectedRecordId.value = null;
   }
@@ -228,14 +345,28 @@ const fetchConfig = async (): Promise<void> => {
 };
 
 const fetchRecords = async (): Promise<void> => {
-  const response = await fetch(`${apiBase}/_proxira/api/records`);
+  if (!currentGroupId.value) {
+    records.value = [];
+    selectedRecordId.value = null;
+    return;
+  }
+
+  const response = await fetch(withGroupQuery("/_proxira/api/records"));
   if (!response.ok) {
     throw new Error("加载历史记录失败");
   }
 
   const payload = (await response.json()) as ProxyRecordsResponse;
   records.value = payload.items;
-  if (payload.items.length > 0 && !selectedRecordId.value) {
+  if (payload.items.length === 0) {
+    selectedRecordId.value = null;
+    return;
+  }
+
+  const currentStillExists = selectedRecordId.value
+    ? payload.items.some((item) => item.id === selectedRecordId.value)
+    : false;
+  if (!currentStillExists) {
     selectedRecordId.value = payload.items[0].id;
   }
 };
@@ -261,9 +392,10 @@ const connectSse = (): void => {
   };
 };
 
-const saveTarget = async (): Promise<void> => {
-  saving.value = true;
-  message.value = "";
+const switchActiveGroup = async (nextGroupId: string): Promise<void> => {
+  if (!nextGroupId || nextGroupId === activeGroupId.value) {
+    return;
+  }
 
   try {
     const response = await fetch(`${apiBase}/_proxira/api/config`, {
@@ -271,20 +403,205 @@ const saveTarget = async (): Promise<void> => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ targetBaseUrl: targetBaseUrl.value }),
+      body: JSON.stringify({ activeGroupId: nextGroupId }),
     });
-
     if (!response.ok) {
-      throw new Error("保存失败，请检查地址格式。");
+      throw new Error("切换分组失败");
     }
 
     const config = (await response.json()) as ProxyConfig;
     syncConfig(config);
-    message.value = "保存成功";
+    await fetchRecords();
   } catch (error) {
-    message.value = error instanceof Error ? error.message : "保存失败";
+    pushToast(error instanceof Error ? error.message : "切换分组失败", "error");
+  }
+};
+
+const onGroupSelect = (nextGroupId: string): void => {
+  void switchActiveGroup(nextGroupId);
+};
+
+const createGroup = async (groupNameRaw: string, targetBaseUrlRaw: string): Promise<void> => {
+  const nextGroupName = groupNameRaw.trim();
+  if (!nextGroupName) {
+    pushToast("分组名称为必填项", "error");
+    return;
+  }
+
+  const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
+  if (!normalizedTarget) {
+    pushToast("分组地址为必填项，且必须是 http/https URL", "error");
+    return;
+  }
+
+  if (isTargetDuplicated(normalizedTarget)) {
+    pushToast("分组地址不能与已有分组重复", "error");
+    return;
+  }
+
+  groupModalSubmitting.value = true;
+  try {
+    const response = await fetch(`${apiBase}/_proxira/api/groups`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: nextGroupName,
+        targetBaseUrl: normalizedTarget,
+        switchToNew: true,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response, "创建分组失败，请检查地址格式"));
+    }
+
+    const payload = (await response.json()) as { config: ProxyConfig };
+    syncConfig(payload.config);
+    await fetchRecords();
+    groupModalOpen.value = false;
+    pushToast("分组已创建并切换", "success");
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : "创建分组失败", "error");
   } finally {
-    saving.value = false;
+    groupModalSubmitting.value = false;
+  }
+};
+
+const saveActiveGroup = async (groupNameRaw: string, targetBaseUrlRaw: string): Promise<void> => {
+  if (!currentGroupId.value) {
+    pushToast("当前没有可用分组", "error");
+    return;
+  }
+
+  const groupName = groupNameRaw.trim();
+  if (!groupName) {
+    pushToast("分组名称为必填项", "error");
+    return;
+  }
+
+  const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
+  if (!normalizedTarget) {
+    pushToast("分组地址必须是有效的 http/https URL", "error");
+    return;
+  }
+
+  if (isTargetDuplicated(normalizedTarget, currentGroupId.value)) {
+    pushToast("分组地址不能与其他分组重复", "error");
+    return;
+  }
+
+  groupModalSubmitting.value = true;
+
+  try {
+    const response = await fetch(`${apiBase}/_proxira/api/groups/${encodeURIComponent(currentGroupId.value)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: groupName,
+        targetBaseUrl: normalizedTarget,
+        makeActive: true,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response, "保存失败，请检查地址格式。"));
+    }
+
+    const payload = (await response.json()) as { config: ProxyConfig };
+    syncConfig(payload.config);
+    groupModalOpen.value = false;
+    pushToast("分组配置已保存", "success");
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : "保存失败", "error");
+  } finally {
+    groupModalSubmitting.value = false;
+  }
+};
+
+const openCreateGroupModal = (): void => {
+  groupModalMode.value = "create";
+  modalGroupName.value = "";
+  modalTargetBaseUrl.value = "";
+  groupModalOpen.value = true;
+};
+
+const openEditGroupModal = (): void => {
+  const group = activeGroup.value;
+  if (!group) {
+    pushToast("当前没有可编辑的分组", "error");
+    return;
+  }
+
+  groupModalMode.value = "edit";
+  modalGroupName.value = group.name;
+  modalTargetBaseUrl.value = group.targetBaseUrl;
+  groupModalOpen.value = true;
+};
+
+const closeGroupModal = (): void => {
+  if (groupModalSubmitting.value) {
+    return;
+  }
+  groupModalOpen.value = false;
+};
+
+const submitGroupModal = async (payload: { name: string; targetBaseUrl: string }): Promise<void> => {
+  if (groupModalMode.value === "create") {
+    await createGroup(payload.name, payload.targetBaseUrl);
+    return;
+  }
+  await saveActiveGroup(payload.name, payload.targetBaseUrl);
+};
+
+const openDeleteGroupModal = (groupId: string): void => {
+  const targetGroup = groups.value.find((group) => group.id === groupId) ?? null;
+  if (!targetGroup) {
+    pushToast("分组不存在，无法删除", "error");
+    return;
+  }
+
+  pendingDeleteGroup.value = targetGroup;
+  deleteGroupModalOpen.value = true;
+};
+
+const closeDeleteGroupModal = (): void => {
+  if (deleteGroupSubmitting.value) {
+    return;
+  }
+  deleteGroupModalOpen.value = false;
+  pendingDeleteGroup.value = null;
+};
+
+const confirmDeleteGroup = async (): Promise<void> => {
+  const targetGroup = pendingDeleteGroup.value;
+  if (!targetGroup) {
+    return;
+  }
+
+  deleteGroupSubmitting.value = true;
+  try {
+    const response = await fetch(`${apiBase}/_proxira/api/groups/${encodeURIComponent(targetGroup.id)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error(await extractErrorMessage(response, "删除分组失败"));
+    }
+
+    const payload = (await response.json()) as {
+      clearedRecords: number;
+      config: ProxyConfig;
+    };
+    syncConfig(payload.config);
+    await fetchRecords();
+    pushToast(`已删除分组「${targetGroup.name}」，清除 ${payload.clearedRecords} 条数据`, "success");
+    closeDeleteGroupModal();
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : "删除分组失败", "error");
+  } finally {
+    deleteGroupSubmitting.value = false;
   }
 };
 
@@ -293,9 +610,13 @@ const onSelectRecord = (recordId: string): void => {
 };
 
 const removeRecord = async (recordId: string): Promise<void> => {
+  if (!currentGroupId.value) {
+    return;
+  }
+
   deletingRecordId.value = recordId;
   try {
-    const response = await fetch(`${apiBase}/_proxira/api/records/${recordId}`, {
+    const response = await fetch(withGroupQuery(`/_proxira/api/records/${recordId}`), {
       method: "DELETE",
     });
     if (!response.ok) {
@@ -303,18 +624,22 @@ const removeRecord = async (recordId: string): Promise<void> => {
     }
     removeRecordLocal(recordId);
   } catch (error) {
-    message.value = error instanceof Error ? error.message : "删除失败";
+    pushToast(error instanceof Error ? error.message : "删除失败", "error");
   } finally {
     deletingRecordId.value = null;
   }
 };
 
 const exportRecords = async (): Promise<void> => {
+  if (!currentGroupId.value) {
+    pushToast("当前没有可导出的分组", "error");
+    return;
+  }
+
   exporting.value = true;
-  message.value = "";
 
   try {
-    const response = await fetch(`${apiBase}/_proxira/api/records/export`);
+    const response = await fetch(withGroupQuery("/_proxira/api/records/export"));
     if (!response.ok) {
       throw new Error("导出失败");
     }
@@ -325,25 +650,83 @@ const exportRecords = async (): Promise<void> => {
     const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
+    const groupToken =
+      payload.groupName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") ||
+      "group";
     link.href = objectUrl;
-    link.download = `proxira-records-${fileToken}.json`;
+    link.download = `proxira-${groupToken}-records-${fileToken}.json`;
     document.body.append(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(objectUrl);
-    message.value = `导出成功，共 ${payload.total} 条`;
+    pushToast(`导出成功，共 ${payload.total} 条`, "success");
   } catch (error) {
-    message.value = error instanceof Error ? error.message : "导出失败";
+    pushToast(error instanceof Error ? error.message : "导出失败", "error");
   } finally {
     exporting.value = false;
   }
 };
 
+const clearRecords = async (): Promise<void> => {
+  if (!currentGroupId.value) {
+    pushToast("当前没有可清除的分组", "error");
+    return;
+  }
+
+  clearingRecords.value = true;
+  try {
+    const response = await fetch(withGroupQuery("/_proxira/api/records"), {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error("清除历史记录失败");
+    }
+
+    const payload = (await response.json()) as { cleared: number };
+    records.value = [];
+    selectedRecordId.value = null;
+    pushToast(`已清除 ${payload.cleared} 条历史记录`, "success");
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : "清除历史记录失败", "error");
+  } finally {
+    clearingRecords.value = false;
+  }
+};
+
+const resetAllContent = async (): Promise<void> => {
+  if (!window.confirm("确认重置所有分组和历史记录吗？该操作不可恢复。")) {
+    return;
+  }
+
+  resettingAll.value = true;
+  try {
+    const response = await fetch(`${apiBase}/_proxira/api/reset`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error("重置失败");
+    }
+
+    const payload = (await response.json()) as {
+      clearedRecords: number;
+      config: ProxyConfig;
+    };
+    syncConfig(payload.config);
+    await fetchRecords();
+    pushToast(`已重置全部内容，清除 ${payload.clearedRecords} 条历史`, "success");
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : "重置失败", "error");
+  } finally {
+    resettingAll.value = false;
+  }
+};
+
 onMounted(async () => {
   try {
-    await Promise.all([fetchConfig(), fetchRecords()]);
+    await fetchConfig();
+    await fetchRecords();
   } catch (error) {
-    message.value = error instanceof Error ? error.message : "初始化失败";
+    pushToast(error instanceof Error ? error.message : "初始化失败", "error");
   }
 
   connectSse();
@@ -351,6 +734,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   events?.close();
+  for (const timer of toastTimers.values()) {
+    clearTimeout(timer);
+  }
+  toastTimers.clear();
 });
 </script>
 
@@ -362,34 +749,37 @@ onBeforeUnmount(() => {
         <h1 class="title">Proxira 管理面板</h1>
       </div>
       <div class="status-group">
+        <span class="counter">当前分组：{{ activeGroup?.name ?? "暂无分组" }}</span>
+        <span class="counter">{{ groupsCountLabel }}</span>
         <span class="badge" :data-state="connectionState">{{ connectionLabel }}</span>
         <span class="counter">{{ recordsCountLabel }}</span>
       </div>
     </header>
 
-    <section class="controls">
-      <article class="card control-card">
-        <h2 class="section-title">真实转发地址</h2>
-        <p class="section-desc">所有请求会转发到此地址。</p>
-        <div class="control-row">
-          <input
-            v-model="targetBaseUrl"
-            class="input"
-            type="text"
-            placeholder="http://localhost:8080"
-          />
-          <button class="button" :disabled="saving" @click="saveTarget">
-            {{ saving ? "保存中..." : "保存配置" }}
-          </button>
-        </div>
-        <p v-if="message" class="hint">{{ message }}</p>
-      </article>
-
-      <article class="card control-card compact">
-        <h2 class="section-title">连接控制</h2>
-        <p class="section-desc">SSE 实时推送请求记录。</p>
-        <button class="button button-ghost" @click="connectSse">重连 SSE</button>
-      </article>
+    <section class="action-zone card">
+      <div class="action-zone-head">
+        <h2 class="section-title">功能操作区</h2>
+        <p class="section-desc">分组管理与连接控制统一放在这里。</p>
+      </div>
+      <div class="action-zone-controls">
+        <GroupPicker
+          class="action-group-picker"
+          :groups="groups"
+          :model-value="currentGroupId"
+          @update:modelValue="onGroupSelect"
+          @request-delete="openDeleteGroupModal"
+        />
+        <button class="button button-ghost panel-button" type="button" @click="connectSse">重连</button>
+        <button class="button button-ghost panel-button" type="button" @click="openCreateGroupModal">
+          新增分组
+        </button>
+        <button class="button button-ghost panel-button" type="button" :disabled="!activeGroup" @click="openEditGroupModal">
+          编辑当前分组
+        </button>
+        <button class="button panel-button button-danger" type="button" :disabled="resettingAll" @click="resetAllContent">
+          {{ resettingAll ? "重置中..." : "重置全部" }}
+        </button>
+      </div>
     </section>
 
     <section class="workspace">
@@ -398,6 +788,9 @@ onBeforeUnmount(() => {
           <h2 class="section-title">历史请求</h2>
           <div class="panel-actions">
             <span class="panel-meta">最新优先</span>
+            <button class="button button-ghost panel-button panel-button-danger" :disabled="clearingRecords" @click="clearRecords">
+              {{ clearingRecords ? "清除中..." : "清除" }}
+            </button>
             <button class="button button-ghost panel-button" :disabled="exporting" @click="exportRecords">
               {{ exporting ? "导出中..." : "导出 JSON" }}
             </button>
@@ -440,6 +833,16 @@ onBeforeUnmount(() => {
       </aside>
 
       <section class="card detail-panel">
+        <header class="detail-toolbar">
+          <div class="detail-toolbar-info">
+            <p class="detail-toolbar-label">当前分组</p>
+            <p class="detail-toolbar-value">
+              {{ activeGroup?.name ?? "暂无分组" }}
+              <span class="detail-toolbar-target">{{ activeGroup?.targetBaseUrl ?? "-" }}</span>
+            </p>
+          </div>
+        </header>
+
         <p v-if="!selectedRecord" class="empty">请选择一条请求记录查看详情。</p>
 
         <template v-else>
@@ -598,5 +1001,27 @@ onBeforeUnmount(() => {
         </template>
       </section>
     </section>
+    <ToastMessages :messages="toastMessages" @dismiss="dismissToast" />
+    <GroupFormModal
+      :open="groupModalOpen"
+      :title="modalTitle"
+      :description="modalDesc"
+      :submit-text="modalSubmitText"
+      :loading="groupModalSubmitting"
+      :initial-name="modalGroupName"
+      :initial-target-base-url="modalTargetBaseUrl"
+      @close="closeGroupModal"
+      @submit="submitGroupModal"
+    />
+    <ConfirmDialog
+      :open="deleteGroupModalOpen"
+      title="确认删除分组"
+      :message="`将删除分组「${pendingDeleteGroup?.name ?? ''}」，并清除该分组下的所有历史请求数据。此操作不可恢复。`"
+      confirm-text="确认删除"
+      :loading="deleteGroupSubmitting"
+      :danger="true"
+      @close="closeDeleteGroupModal"
+      @confirm="confirmDeleteGroup"
+    />
   </main>
 </template>

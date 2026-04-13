@@ -9,6 +9,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ProxyConfig,
+  ProxyGroup,
   ProxyHeaders,
   ProxyPayloadBody,
   ProxyQueryParams,
@@ -39,6 +40,7 @@ const HISTORY_LIMIT = Number.isFinite(HISTORY_LIMIT_RAW)
 
 const DATA_DIR = resolve(process.env.PROXY_DATA_DIR?.trim() || join(process.cwd(), ".proxira"));
 const CONFIG_FILE = join(DATA_DIR, "config.json");
+const HISTORY_FILE = join(DATA_DIR, "history.json");
 
 const RESPONSE_HOP_BY_HOP_HEADERS = [
   "connection",
@@ -88,13 +90,18 @@ const MIME_BY_EXT: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
+const DEFAULT_TARGET_BASE_URL = process.env.PROXY_TARGET_URL?.trim() || "http://localhost:8080";
+
 const proxyConfig: ProxyConfig = {
-  targetBaseUrl: process.env.PROXY_TARGET_URL?.trim() || "http://localhost:8080",
+  activeGroupId: "",
+  groups: [],
+  targetBaseUrl: DEFAULT_TARGET_BASE_URL,
 };
 
-const history: ProxyTrafficRecord[] = [];
+const historyByGroup = new Map<string, ProxyTrafficRecord[]>();
 const sseClients = new Map<string, SseClient>();
 let persistQueue = Promise.resolve();
+type HistoryFilePayload = Record<string, ProxyTrafficRecord[]>;
 
 const resolveDashboardDistDir = (): string | null => {
   const fromEnv = process.env.DASHBOARD_DIST_DIR?.trim();
@@ -157,6 +164,84 @@ const normalizeTargetBaseUrl = (value: string): string | null => {
   } catch {
     return null;
   }
+};
+
+const createGroup = (name: string, targetBaseUrl: string): ProxyGroup => {
+  return {
+    id: crypto.randomUUID(),
+    name: name.trim(),
+    targetBaseUrl,
+  };
+};
+
+const normalizeGroupName = (nameRaw: string, fallbackIndex: number): string => {
+  const normalized = nameRaw.trim();
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return `分组 ${fallbackIndex}`;
+};
+
+const listGroupHistorySize = (): number => {
+  let total = 0;
+  for (const items of historyByGroup.values()) {
+    total += items.length;
+  }
+  return total;
+};
+
+const ensureGroupHistory = (groupId: string): ProxyTrafficRecord[] => {
+  const existing = historyByGroup.get(groupId);
+  if (existing) {
+    return existing;
+  }
+
+  const created: ProxyTrafficRecord[] = [];
+  historyByGroup.set(groupId, created);
+  return created;
+};
+
+const findGroupById = (groupId: string): ProxyGroup | undefined => {
+  return proxyConfig.groups.find((group) => group.id === groupId);
+};
+
+const syncConfigTargetBaseUrl = (): void => {
+  const activeGroup = findGroupById(proxyConfig.activeGroupId) ?? null;
+  proxyConfig.targetBaseUrl = activeGroup?.targetBaseUrl ?? "";
+};
+
+const ensureActiveGroup = (): ProxyGroup | null => {
+  const currentActive = findGroupById(proxyConfig.activeGroupId);
+  if (currentActive) {
+    return currentActive;
+  }
+
+  const fallback = proxyConfig.groups[0] ?? null;
+  if (!fallback) {
+    proxyConfig.activeGroupId = "";
+    proxyConfig.targetBaseUrl = "";
+    return null;
+  }
+
+  proxyConfig.activeGroupId = fallback.id;
+  proxyConfig.targetBaseUrl = fallback.targetBaseUrl;
+  return fallback;
+};
+
+const resolveGroupOrActive = (groupIdRaw: string | undefined): ProxyGroup | null => {
+  if (groupIdRaw) {
+    return findGroupById(groupIdRaw) ?? null;
+  }
+  return ensureActiveGroup();
+};
+
+const hasTargetConflict = (targetBaseUrl: string, ignoreGroupId?: string): boolean => {
+  return proxyConfig.groups.some((group) => {
+    if (ignoreGroupId && group.id === ignoreGroupId) {
+      return false;
+    }
+    return group.targetBaseUrl === targetBaseUrl;
+  });
 };
 
 const isTextualContentType = (contentType: string | null): boolean => {
@@ -318,6 +403,20 @@ const saveConfig = (): void => {
   });
 };
 
+const serializeHistory = (): HistoryFilePayload => {
+  const payload: HistoryFilePayload = {};
+  for (const group of proxyConfig.groups) {
+    payload[group.id] = ensureGroupHistory(group.id);
+  }
+  return payload;
+};
+
+const saveHistory = (): void => {
+  enqueuePersist(async () => {
+    await saveJsonFile(HISTORY_FILE, serializeHistory());
+  });
+};
+
 const readJsonFile = async <T>(filePath: string): Promise<T | null> => {
   if (!existsSync(filePath)) {
     return null;
@@ -331,23 +430,98 @@ const readJsonFile = async <T>(filePath: string): Promise<T | null> => {
   }
 };
 
-const addHistoryRecord = (record: ProxyTrafficRecord): void => {
-  history.unshift(record);
-  broadcastEvent({ type: "record", record });
-  while (history.length > HISTORY_LIMIT) {
-    const removed = history.pop();
-    if (removed) {
-      broadcastEvent({ type: "record_deleted", id: removed.id });
+const isRecordBody = (value: unknown): value is ProxyPayloadBody => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const body = value as Partial<ProxyPayloadBody>;
+  return (
+    (typeof body.text === "string" || body.text === null) &&
+    typeof body.size === "number" &&
+    typeof body.truncated === "boolean" &&
+    typeof body.isBinary === "boolean"
+  );
+};
+
+const normalizeRecord = (value: unknown, groupId: string): ProxyTrafficRecord | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const item = value as Partial<ProxyTrafficRecord>;
+  if (
+    typeof item.id !== "string" ||
+    typeof item.timestamp !== "string" ||
+    typeof item.method !== "string" ||
+    typeof item.path !== "string" ||
+    !item.requestBody ||
+    !isRecordBody(item.requestBody) ||
+    typeof item.upstreamUrl !== "string" ||
+    typeof item.durationMs !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    id: item.id,
+    groupId,
+    timestamp: item.timestamp,
+    method: item.method,
+    path: item.path,
+    query: item.query && typeof item.query === "object" ? item.query : {},
+    requestHeaders: item.requestHeaders && typeof item.requestHeaders === "object" ? item.requestHeaders : {},
+    requestBody: item.requestBody,
+    upstreamUrl: item.upstreamUrl,
+    responseStatus: typeof item.responseStatus === "number" ? item.responseStatus : null,
+    responseHeaders: item.responseHeaders && typeof item.responseHeaders === "object" ? item.responseHeaders : {},
+    responseBody: item.responseBody && isRecordBody(item.responseBody) ? item.responseBody : null,
+    durationMs: item.durationMs,
+    error: typeof item.error === "string" ? item.error : null,
+  };
+};
+
+const hydrateGroupHistory = (
+  fileHistory: Partial<Record<string, unknown>> | null,
+  group: ProxyGroup,
+): ProxyTrafficRecord[] => {
+  const rawItems = fileHistory?.[group.id];
+  if (!Array.isArray(rawItems)) {
+    return [];
+  }
+
+  const nextItems: ProxyTrafficRecord[] = [];
+  for (const rawItem of rawItems) {
+    const normalized = normalizeRecord(rawItem, group.id);
+    if (normalized) {
+      nextItems.push(normalized);
+    }
+    if (nextItems.length >= HISTORY_LIMIT) {
+      break;
     }
   }
+  return nextItems;
+};
+
+const addHistoryRecord = (groupId: string, record: ProxyTrafficRecord): void => {
+  const groupHistory = ensureGroupHistory(groupId);
+  groupHistory.unshift(record);
+  broadcastEvent({ type: "record", groupId, record });
+  while (groupHistory.length > HISTORY_LIMIT) {
+    const removed = groupHistory.pop();
+    if (removed) {
+      broadcastEvent({ type: "record_deleted", groupId, id: removed.id });
+    }
+  }
+  saveHistory();
 };
 
 const filterRecords = (
+  source: ProxyTrafficRecord[],
   methodRaw: string | undefined,
   pathRaw: string | undefined,
   statusRaw: string | undefined,
 ): ProxyTrafficRecord[] => {
-  let filtered = history;
+  let filtered = source;
   if (methodRaw) {
     filtered = filtered.filter((item) => item.method === methodRaw);
   }
@@ -371,13 +545,53 @@ const hydrateState = async (): Promise<void> => {
   await mkdir(DATA_DIR, { recursive: true });
 
   const fileConfig = await readJsonFile<Partial<ProxyConfig>>(CONFIG_FILE);
-  const normalizedTarget = fileConfig?.targetBaseUrl
-    ? normalizeTargetBaseUrl(fileConfig.targetBaseUrl)
-    : null;
-  if (normalizedTarget) {
-    proxyConfig.targetBaseUrl = normalizedTarget;
+  const fileHistory = await readJsonFile<Partial<Record<string, unknown>>>(HISTORY_FILE);
+  const normalizedDefaultTarget =
+    normalizeTargetBaseUrl(DEFAULT_TARGET_BASE_URL) ?? "http://localhost:8080";
+  const hydratedGroups: ProxyGroup[] = [];
+
+  if (Array.isArray(fileConfig?.groups)) {
+    for (const group of fileConfig.groups) {
+      if (!group || typeof group.id !== "string" || typeof group.targetBaseUrl !== "string") {
+        continue;
+      }
+      const normalizedTarget = normalizeTargetBaseUrl(group.targetBaseUrl);
+      if (!normalizedTarget) {
+        continue;
+      }
+      hydratedGroups.push({
+        id: group.id,
+        name: normalizeGroupName(group.name ?? "", hydratedGroups.length + 1),
+        targetBaseUrl: normalizedTarget,
+      });
+    }
   }
 
+  if (hydratedGroups.length === 0) {
+    const legacyTarget = fileConfig?.targetBaseUrl
+      ? normalizeTargetBaseUrl(fileConfig.targetBaseUrl)
+      : null;
+    const fallbackTarget = legacyTarget ?? normalizedDefaultTarget;
+    hydratedGroups.push(createGroup("默认分组", fallbackTarget));
+  }
+
+  proxyConfig.groups = hydratedGroups;
+  const preferredGroupId = typeof fileConfig?.activeGroupId === "string" ? fileConfig.activeGroupId : "";
+  const selectedGroup =
+    (preferredGroupId ? hydratedGroups.find((group) => group.id === preferredGroupId) : null) ??
+    hydratedGroups[0] ??
+    null;
+
+  proxyConfig.activeGroupId = selectedGroup?.id ?? "";
+  syncConfigTargetBaseUrl();
+
+  historyByGroup.clear();
+  for (const group of hydratedGroups) {
+    historyByGroup.set(group.id, hydrateGroupHistory(fileHistory, group));
+  }
+
+  saveConfig();
+  saveHistory();
 };
 
 const printStartupTips = (port: number): void => {
@@ -466,7 +680,7 @@ app.get("/_proxira/api/status", (c) => {
     startedAt: new Date(startedAt).toISOString(),
     uptimeMs: Date.now() - startedAt,
     config: proxyConfig,
-    historySize: history.length,
+    historySize: listGroupHistorySize(),
     sseClients: sseClients.size,
   };
   return c.json(payload);
@@ -482,17 +696,201 @@ app.put("/_proxira/api/config", async (c) => {
     return c.json({ message: "Invalid JSON payload." }, 400);
   }
 
-  const normalized = payload.targetBaseUrl
-    ? normalizeTargetBaseUrl(payload.targetBaseUrl)
-    : null;
-  if (!normalized) {
-    return c.json({ message: "targetBaseUrl must be a valid HTTP/HTTPS URL." }, 400);
+  const hasGroupSwitch = typeof payload.activeGroupId === "string";
+  const hasTargetUpdate = typeof payload.targetBaseUrl === "string";
+  if (!hasGroupSwitch && !hasTargetUpdate) {
+    return c.json({ message: "activeGroupId or targetBaseUrl is required." }, 400);
   }
 
-  proxyConfig.targetBaseUrl = normalized;
+  if (hasGroupSwitch) {
+    const nextGroup = payload.activeGroupId
+      ? findGroupById(payload.activeGroupId)
+      : null;
+    if (!nextGroup) {
+      return c.json({ message: "activeGroupId not found." }, 400);
+    }
+    proxyConfig.activeGroupId = nextGroup.id;
+  }
+
+  const activeGroup = ensureActiveGroup();
+  if (!activeGroup) {
+    return c.json({ message: "No active group available." }, 500);
+  }
+
+  if (hasTargetUpdate) {
+    const normalized = normalizeTargetBaseUrl(payload.targetBaseUrl ?? "");
+    if (!normalized) {
+      return c.json({ message: "targetBaseUrl must be a valid HTTP/HTTPS URL." }, 400);
+    }
+    if (normalized !== activeGroup.targetBaseUrl && hasTargetConflict(normalized, activeGroup.id)) {
+      return c.json({ message: "targetBaseUrl already exists in another group." }, 409);
+    }
+    activeGroup.targetBaseUrl = normalized;
+  }
+
+  syncConfigTargetBaseUrl();
   saveConfig();
   broadcastEvent({ type: "config", config: proxyConfig });
   return c.json(proxyConfig);
+});
+
+app.post("/_proxira/api/groups", async (c) => {
+  let payload: { name?: string; targetBaseUrl?: string; switchToNew?: boolean };
+  try {
+    payload = await c.req.json<{ name?: string; targetBaseUrl?: string; switchToNew?: boolean }>();
+  } catch {
+    return c.json({ message: "Invalid JSON payload." }, 400);
+  }
+
+  const groupName = payload.name?.trim() ?? "";
+  if (!groupName) {
+    return c.json({ message: "name is required." }, 400);
+  }
+
+  const nextTargetRaw = payload.targetBaseUrl?.trim() ?? "";
+  if (!nextTargetRaw) {
+    return c.json({ message: "targetBaseUrl is required." }, 400);
+  }
+
+  const normalizedTarget = normalizeTargetBaseUrl(nextTargetRaw);
+  if (!normalizedTarget) {
+    return c.json({ message: "targetBaseUrl must be a valid HTTP/HTTPS URL." }, 400);
+  }
+
+  if (hasTargetConflict(normalizedTarget)) {
+    return c.json({ message: "targetBaseUrl already exists in another group." }, 409);
+  }
+
+  const nextGroup = createGroup(groupName, normalizedTarget);
+  proxyConfig.groups.push(nextGroup);
+  ensureGroupHistory(nextGroup.id);
+
+  const switchToNew = payload.switchToNew ?? true;
+  if (switchToNew) {
+    proxyConfig.activeGroupId = nextGroup.id;
+  }
+
+  syncConfigTargetBaseUrl();
+  saveConfig();
+  saveHistory();
+  broadcastEvent({ type: "config", config: proxyConfig });
+  return c.json({ group: nextGroup, config: proxyConfig }, 201);
+});
+
+app.put("/_proxira/api/groups/:id", async (c) => {
+  let payload: { name?: string; targetBaseUrl?: string; makeActive?: boolean };
+  try {
+    payload = await c.req.json<{ name?: string; targetBaseUrl?: string; makeActive?: boolean }>();
+  } catch {
+    return c.json({ message: "Invalid JSON payload." }, 400);
+  }
+
+  const groupId = c.req.param("id");
+  const group = findGroupById(groupId);
+  if (!group) {
+    return c.json({ message: "group not found." }, 404);
+  }
+
+  const hasName = typeof payload.name === "string";
+  const hasTarget = typeof payload.targetBaseUrl === "string";
+  const hasActive = typeof payload.makeActive === "boolean";
+  if (!hasName && !hasTarget && !hasActive) {
+    return c.json({ message: "name, targetBaseUrl or makeActive is required." }, 400);
+  }
+
+  if (hasName) {
+    const normalizedName = payload.name?.trim() ?? "";
+    if (!normalizedName) {
+      return c.json({ message: "name cannot be empty." }, 400);
+    }
+    group.name = normalizedName;
+  }
+
+  if (hasTarget) {
+    const normalizedTarget = normalizeTargetBaseUrl(payload.targetBaseUrl ?? "");
+    if (!normalizedTarget) {
+      return c.json({ message: "targetBaseUrl must be a valid HTTP/HTTPS URL." }, 400);
+    }
+    if (normalizedTarget !== group.targetBaseUrl && hasTargetConflict(normalizedTarget, group.id)) {
+      return c.json({ message: "targetBaseUrl already exists in another group." }, 409);
+    }
+    group.targetBaseUrl = normalizedTarget;
+  }
+
+  if (payload.makeActive) {
+    proxyConfig.activeGroupId = group.id;
+  }
+
+  syncConfigTargetBaseUrl();
+  saveConfig();
+  broadcastEvent({ type: "config", config: proxyConfig });
+  return c.json({ group, config: proxyConfig });
+});
+
+app.delete("/_proxira/api/groups/:id", (c) => {
+  const groupId = c.req.param("id");
+  const groupIndex = proxyConfig.groups.findIndex((group) => group.id === groupId);
+  if (groupIndex === -1) {
+    return c.json({ message: "group not found." }, 404);
+  }
+
+  const removedHistory = historyByGroup.get(groupId) ?? [];
+  const clearedRecords = removedHistory.length;
+  proxyConfig.groups.splice(groupIndex, 1);
+  historyByGroup.delete(groupId);
+
+  if (proxyConfig.groups.length === 0) {
+    const fallbackTarget = normalizeTargetBaseUrl(DEFAULT_TARGET_BASE_URL) ?? "http://localhost:8080";
+    const fallbackGroup = createGroup("默认分组", fallbackTarget);
+    proxyConfig.groups = [fallbackGroup];
+    historyByGroup.set(fallbackGroup.id, []);
+  }
+
+  if (proxyConfig.activeGroupId === groupId) {
+    proxyConfig.activeGroupId = proxyConfig.groups[0]?.id ?? "";
+  }
+
+  syncConfigTargetBaseUrl();
+  saveConfig();
+  saveHistory();
+  broadcastEvent({ type: "config", config: proxyConfig });
+
+  return c.json({
+    removed: true,
+    id: groupId,
+    clearedRecords,
+    config: proxyConfig,
+  });
+});
+
+app.post("/_proxira/api/reset", (c) => {
+  const currentActiveGroup = ensureActiveGroup();
+  const fallbackTarget =
+    currentActiveGroup?.targetBaseUrl ??
+    (normalizeTargetBaseUrl(DEFAULT_TARGET_BASE_URL) ?? "http://localhost:8080");
+
+  const previousGroupCount = proxyConfig.groups.length;
+  const previousRecordCount = listGroupHistorySize();
+
+  const nextDefaultGroup = createGroup("默认分组", fallbackTarget);
+  proxyConfig.groups = [nextDefaultGroup];
+  proxyConfig.activeGroupId = nextDefaultGroup.id;
+  syncConfigTargetBaseUrl();
+
+  historyByGroup.clear();
+  historyByGroup.set(nextDefaultGroup.id, []);
+
+  saveConfig();
+  saveHistory();
+  broadcastEvent({ type: "config", config: proxyConfig });
+  broadcastEvent({ type: "records_cleared", groupId: nextDefaultGroup.id });
+
+  return c.json({
+    ok: true,
+    clearedGroups: previousGroupCount,
+    clearedRecords: previousRecordCount,
+    config: proxyConfig,
+  });
 });
 
 app.get("/_proxira/api/records", (c) => {
@@ -501,15 +899,22 @@ app.get("/_proxira/api/records", (c) => {
   const methodRaw = c.req.query("method")?.trim().toUpperCase();
   const pathRaw = c.req.query("path")?.trim();
   const statusRaw = c.req.query("status")?.trim();
+  const groupIdRaw = c.req.query("groupId")?.trim();
 
   const limit = Number.isFinite(limitRaw)
     ? Math.max(1, Math.min(limitRaw, MAX_QUERY_LIMIT))
     : 50;
   const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
 
-  const filtered = filterRecords(methodRaw, pathRaw, statusRaw);
+  const group = resolveGroupOrActive(groupIdRaw);
+  if (!group) {
+    return c.json({ message: "groupId not found." }, 404);
+  }
+
+  const filtered = filterRecords(ensureGroupHistory(group.id), methodRaw, pathRaw, statusRaw);
 
   const payload: ProxyRecordsResponse = {
+    groupId: group.id,
     items: filtered.slice(offset, offset + limit),
     total: filtered.length,
     limit,
@@ -522,15 +927,25 @@ app.get("/_proxira/api/records/export", (c) => {
   const methodRaw = c.req.query("method")?.trim().toUpperCase();
   const pathRaw = c.req.query("path")?.trim();
   const statusRaw = c.req.query("status")?.trim();
-  const filtered = filterRecords(methodRaw, pathRaw, statusRaw);
+  const groupIdRaw = c.req.query("groupId")?.trim();
+  const group = resolveGroupOrActive(groupIdRaw);
+  if (!group) {
+    return c.json({ message: "groupId not found." }, 404);
+  }
+  const filtered = filterRecords(ensureGroupHistory(group.id), methodRaw, pathRaw, statusRaw);
 
   const payload: ProxyRecordsExportResponse = {
     exportedAt: new Date().toISOString(),
+    groupId: group.id,
+    groupName: group.name,
     total: filtered.length,
     items: filtered,
   };
   const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
-  const fileName = `proxira-records-${fileToken}.json`;
+  const groupToken =
+    group.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") ||
+    "group";
+  const fileName = `proxira-${groupToken}-records-${fileToken}.json`;
 
   return new Response(JSON.stringify(payload, null, 2), {
     headers: {
@@ -542,7 +957,11 @@ app.get("/_proxira/api/records/export", (c) => {
 });
 
 app.get("/_proxira/api/records/:id", (c) => {
-  const record = history.find((item) => item.id === c.req.param("id")) ?? null;
+  const group = resolveGroupOrActive(c.req.query("groupId")?.trim());
+  if (!group) {
+    return c.json({ message: "groupId not found." }, 404);
+  }
+  const record = ensureGroupHistory(group.id).find((item) => item.id === c.req.param("id")) ?? null;
   const payload: ProxyRecordDetailResponse = { item: record };
   if (!record) {
     return c.json(payload, 404);
@@ -551,21 +970,35 @@ app.get("/_proxira/api/records/:id", (c) => {
 });
 
 app.delete("/_proxira/api/records/:id", (c) => {
+  const group = resolveGroupOrActive(c.req.query("groupId")?.trim());
+  if (!group) {
+    return c.json({ message: "groupId not found." }, 404);
+  }
+
+  const groupHistory = ensureGroupHistory(group.id);
   const recordId = c.req.param("id");
-  const targetIndex = history.findIndex((item) => item.id === recordId);
+  const targetIndex = groupHistory.findIndex((item) => item.id === recordId);
   if (targetIndex === -1) {
     return c.json({ removed: false, id: recordId }, 404);
   }
 
-  history.splice(targetIndex, 1);
-  broadcastEvent({ type: "record_deleted", id: recordId });
+  groupHistory.splice(targetIndex, 1);
+  saveHistory();
+  broadcastEvent({ type: "record_deleted", groupId: group.id, id: recordId });
   return c.json({ removed: true, id: recordId });
 });
 
 app.delete("/_proxira/api/records", (c) => {
-  const removed = history.length;
-  history.length = 0;
-  broadcastEvent({ type: "records_cleared" });
+  const group = resolveGroupOrActive(c.req.query("groupId")?.trim());
+  if (!group) {
+    return c.json({ message: "groupId not found." }, 404);
+  }
+
+  const groupHistory = ensureGroupHistory(group.id);
+  const removed = groupHistory.length;
+  groupHistory.length = 0;
+  saveHistory();
+  broadcastEvent({ type: "records_cleared", groupId: group.id });
   return c.json({ cleared: removed });
 });
 
@@ -640,7 +1073,11 @@ app.all("/_proxira/*", (c) => c.notFound());
 app.all("*", async (c) => {
   const startedAtMs = Date.now();
   const incomingUrl = new URL(c.req.url);
-  const upstreamUrl = buildUpstreamUrl(proxyConfig.targetBaseUrl, incomingUrl);
+  const activeGroup = ensureActiveGroup();
+  if (!activeGroup) {
+    return c.json({ message: "No active group configured." }, 500);
+  }
+  const upstreamUrl = buildUpstreamUrl(activeGroup.targetBaseUrl, incomingUrl);
   const method = c.req.method.toUpperCase();
 
   const requestBuffer = await c.req.raw
@@ -678,6 +1115,7 @@ app.all("*", async (c) => {
 
     const record: ProxyTrafficRecord = {
       id: crypto.randomUUID(),
+      groupId: activeGroup.id,
       timestamp: new Date().toISOString(),
       method,
       path: incomingUrl.pathname,
@@ -692,7 +1130,7 @@ app.all("*", async (c) => {
       error: null,
     };
 
-    addHistoryRecord(record);
+    addHistoryRecord(activeGroup.id, record);
 
     const downstreamHeaders = stripHeaders(
       upstreamResponse.headers,
@@ -715,6 +1153,7 @@ app.all("*", async (c) => {
 
     const record: ProxyTrafficRecord = {
       id: crypto.randomUUID(),
+      groupId: activeGroup.id,
       timestamp: new Date().toISOString(),
       method,
       path: incomingUrl.pathname,
@@ -729,7 +1168,7 @@ app.all("*", async (c) => {
       error: message,
     };
 
-    addHistoryRecord(record);
+    addHistoryRecord(activeGroup.id, record);
 
     return c.json({ message: "Proxy forwarding failed.", error: message }, 502);
   }

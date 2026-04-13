@@ -12,11 +12,20 @@ export interface ProxyPayloadBody {
 }
 
 export interface ProxyConfig {
+  activeGroupId: string;
+  groups: ProxyGroup[];
+  targetBaseUrl: string;
+}
+
+export interface ProxyGroup {
+  id: string;
+  name: string;
   targetBaseUrl: string;
 }
 
 export interface ProxyTrafficRecord {
   id: string;
+  groupId: string;
   timestamp: string;
   method: string;
   path: string;
@@ -32,6 +41,7 @@ export interface ProxyTrafficRecord {
 }
 
 export interface ProxyRecordsResponse {
+  groupId: string;
   items: ProxyTrafficRecord[];
   total: number;
   limit: number;
@@ -40,6 +50,8 @@ export interface ProxyRecordsResponse {
 
 export interface ProxyRecordsExportResponse {
   exportedAt: string;
+  groupId: string;
+  groupName: string;
   total: number;
   items: ProxyTrafficRecord[];
 }
@@ -59,7 +71,7 @@ export interface ProxyServerStatus {
 export type ProxySseEvent =
   | { type: "snapshot"; config: ProxyConfig }
   | { type: "config"; config: ProxyConfig }
-  | { type: "record"; record: ProxyTrafficRecord }
-  | { type: "record_deleted"; id: string }
-  | { type: "records_cleared" }
+  | { type: "record"; groupId: string; record: ProxyTrafficRecord }
+  | { type: "record_deleted"; groupId: string; id: string }
+  | { type: "records_cleared"; groupId: string }
   | { type: "heartbeat"; at: string };
