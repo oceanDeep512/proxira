@@ -1,0 +1,22 @@
+{
+  "name": "proxira",
+  "version": "1.0.0",
+  "description": "Proxira monorepo：轻量化实时请求代理工具（后端代理 + Web 控制面板）。",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:app": "pnpm --filter ./apps/getway build:pkg",
+    "build:cli": "pnpm --filter ./apps/getway build:pkg",
+    "pack:cli": "pnpm --filter ./apps/getway pack:pkg",
+    "start:app": "pnpm --filter ./apps/getway start",
+    "serve:app": "pnpm run build:app && pnpm run start:app",
+    "dev:getway": "pnpm --filter ./apps/getway dev",
+    "dev:dashboard": "pnpm --filter @proxira/dashboard dev",
+    "start:getway": "pnpm --filter ./apps/getway start",
+    "start:cli": "pnpm --filter ./apps/getway start:cli"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.12.4"
+}

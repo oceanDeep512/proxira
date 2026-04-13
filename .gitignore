@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+apps/*/dist/
+apps/getway/dashboard-dist/
+*.tsbuildinfo
+
+# Package artifacts
+*.tgz
+
+# Runtime data
+.proxira/
+*.log
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Editor/OS
+.vscode/
+.DS_Store
