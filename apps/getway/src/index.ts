@@ -13,6 +13,7 @@ import type {
   ProxyPayloadBody,
   ProxyQueryParams,
   ProxyRecordDetailResponse,
+  ProxyRecordsExportResponse,
   ProxyRecordsResponse,
   ProxyServerStatus,
   ProxySseEvent,
@@ -30,7 +31,11 @@ const SERVER_PORT = Number(process.env.PORT ?? 3000);
 const BODY_LIMIT = Number(process.env.PROXY_BODY_LIMIT ?? 32_768);
 const MAX_QUERY_LIMIT = Number(process.env.PROXY_QUERY_LIMIT_MAX ?? 500);
 const SSE_HEARTBEAT_MS = Number(process.env.PROXY_SSE_HEARTBEAT_MS ?? 15_000);
+const HISTORY_LIMIT_RAW = Number(process.env.PROXY_HISTORY_LIMIT ?? 1_000);
 const DISABLE_STARTUP_BANNER = process.env.PROXY_DISABLE_BANNER === "1";
+const HISTORY_LIMIT = Number.isFinite(HISTORY_LIMIT_RAW)
+  ? Math.max(1, Math.floor(HISTORY_LIMIT_RAW))
+  : 1_000;
 
 const DATA_DIR = resolve(process.env.PROXY_DATA_DIR?.trim() || join(process.cwd(), ".proxira"));
 const CONFIG_FILE = join(DATA_DIR, "config.json");
@@ -329,6 +334,37 @@ const readJsonFile = async <T>(filePath: string): Promise<T | null> => {
 const addHistoryRecord = (record: ProxyTrafficRecord): void => {
   history.unshift(record);
   broadcastEvent({ type: "record", record });
+  while (history.length > HISTORY_LIMIT) {
+    const removed = history.pop();
+    if (removed) {
+      broadcastEvent({ type: "record_deleted", id: removed.id });
+    }
+  }
+};
+
+const filterRecords = (
+  methodRaw: string | undefined,
+  pathRaw: string | undefined,
+  statusRaw: string | undefined,
+): ProxyTrafficRecord[] => {
+  let filtered = history;
+  if (methodRaw) {
+    filtered = filtered.filter((item) => item.method === methodRaw);
+  }
+  if (pathRaw) {
+    filtered = filtered.filter((item) => item.path.includes(pathRaw));
+  }
+  if (statusRaw) {
+    if (statusRaw === "error") {
+      filtered = filtered.filter((item) => item.error !== null);
+    } else {
+      const statusCode = Number(statusRaw);
+      if (Number.isFinite(statusCode)) {
+        filtered = filtered.filter((item) => item.responseStatus === statusCode);
+      }
+    }
+  }
+  return filtered;
 };
 
 const hydrateState = async (): Promise<void> => {
@@ -360,7 +396,7 @@ const printStartupTips = (port: number): void => {
       "",
       chalk.bold("CLI 示例"),
       "  proxira --port 3010 --target http://localhost:8080",
-      "  proxira start -p 3001 -d ./.proxira",
+      "  proxira -p 3001 -d ./.proxira",
       "  proxira --help",
     );
   }
@@ -376,6 +412,7 @@ const printStartupInfo = (port: number): void => {
     console.log(`代理服务已启动：${proxyUrl}`);
     console.log(`当前上游地址：${proxyConfig.targetBaseUrl}`);
     console.log(`数据目录：${DATA_DIR}`);
+    console.log(`历史记录上限：${HISTORY_LIMIT}`);
     if (dashboardDistDir) {
       console.log(`管理面板：${dashboardUrl}`);
     } else {
@@ -401,6 +438,7 @@ const printStartupInfo = (port: number): void => {
         : chalk.yellow("not found (run dashboard build)")
     }`,
     `${chalk.bold("Target")}: ${chalk.green(proxyConfig.targetBaseUrl)}`,
+    `${chalk.bold("History Limit")}: ${chalk.gray(String(HISTORY_LIMIT))}`,
     `${chalk.bold("Data Dir")}: ${chalk.gray(DATA_DIR)}`,
   ].join("\n");
 
@@ -469,23 +507,7 @@ app.get("/_proxira/api/records", (c) => {
     : 50;
   const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
 
-  let filtered = history;
-  if (methodRaw) {
-    filtered = filtered.filter((item) => item.method === methodRaw);
-  }
-  if (pathRaw) {
-    filtered = filtered.filter((item) => item.path.includes(pathRaw));
-  }
-  if (statusRaw) {
-    if (statusRaw === "error") {
-      filtered = filtered.filter((item) => item.error !== null);
-    } else {
-      const statusCode = Number(statusRaw);
-      if (Number.isFinite(statusCode)) {
-        filtered = filtered.filter((item) => item.responseStatus === statusCode);
-      }
-    }
-  }
+  const filtered = filterRecords(methodRaw, pathRaw, statusRaw);
 
   const payload: ProxyRecordsResponse = {
     items: filtered.slice(offset, offset + limit),
@@ -494,6 +516,29 @@ app.get("/_proxira/api/records", (c) => {
     offset,
   };
   return c.json(payload);
+});
+
+app.get("/_proxira/api/records/export", (c) => {
+  const methodRaw = c.req.query("method")?.trim().toUpperCase();
+  const pathRaw = c.req.query("path")?.trim();
+  const statusRaw = c.req.query("status")?.trim();
+  const filtered = filterRecords(methodRaw, pathRaw, statusRaw);
+
+  const payload: ProxyRecordsExportResponse = {
+    exportedAt: new Date().toISOString(),
+    total: filtered.length,
+    items: filtered,
+  };
+  const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
+  const fileName = `proxira-records-${fileToken}.json`;
+
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+    },
+  });
 });
 
 app.get("/_proxira/api/records/:id", (c) => {

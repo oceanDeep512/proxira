@@ -5,6 +5,7 @@ import type {
   ProxyConfig,
   ProxyHeaders,
   ProxyPayloadBody,
+  ProxyRecordsExportResponse,
   ProxyRecordsResponse,
   ProxySseEvent,
   ProxyTrafficRecord,
@@ -19,6 +20,7 @@ const selectedRecordId = ref<string | null>(null);
 const deletingRecordId = ref<string | null>(null);
 const connectionState = ref<"connecting" | "open" | "closed">("connecting");
 const saving = ref(false);
+const exporting = ref(false);
 const message = ref("");
 
 let events: EventSource | null = null;
@@ -111,6 +113,61 @@ const formatTime = (iso: string): string => {
 };
 
 const formatDuration = (durationMs: number): string => `${durationMs} ms`;
+
+const toPrettyJson = (value: unknown): string => JSON.stringify(value, null, 2);
+
+const bodyViewToCopyText = (body: BodyView): string => {
+  if (body.mode === "json") {
+    return toPrettyJson(body.jsonData ?? {});
+  }
+  if (body.mode === "text") {
+    return body.text;
+  }
+  return body.note;
+};
+
+const shellEscape = (text: string): string => `'${text.replace(/'/g, "'\\''")}'`;
+
+const appendHeaderArgs = (parts: string[], headers: ProxyHeaders): void => {
+  for (const [key, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        parts.push("-H", shellEscape(`${key}: ${item}`));
+      }
+      continue;
+    }
+    parts.push("-H", shellEscape(`${key}: ${value}`));
+  }
+};
+
+const buildCurlCommand = (record: ProxyTrafficRecord): string => {
+  const commandParts = ["curl", "-X", record.method];
+  appendHeaderArgs(commandParts, record.requestHeaders);
+  if (
+    record.method !== "GET" &&
+    record.method !== "HEAD" &&
+    record.requestBody.text &&
+    record.requestBody.text.length > 0
+  ) {
+    commandParts.push("--data-raw", shellEscape(record.requestBody.text));
+  }
+  commandParts.push(shellEscape(record.upstreamUrl));
+  return commandParts.join(" ");
+};
+
+const copyText = async (label: string, text: string): Promise<void> => {
+  if (!text) {
+    message.value = `${label} 为空`;
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    message.value = `已复制 ${label}`;
+  } catch {
+    message.value = `复制 ${label} 失败，请检查浏览器权限`;
+  }
+};
 
 const syncConfig = (config: ProxyConfig): void => {
   targetBaseUrl.value = config.targetBaseUrl;
@@ -252,6 +309,36 @@ const removeRecord = async (recordId: string): Promise<void> => {
   }
 };
 
+const exportRecords = async (): Promise<void> => {
+  exporting.value = true;
+  message.value = "";
+
+  try {
+    const response = await fetch(`${apiBase}/_proxira/api/records/export`);
+    if (!response.ok) {
+      throw new Error("导出失败");
+    }
+
+    const payload = (await response.json()) as ProxyRecordsExportResponse;
+    const jsonText = toPrettyJson(payload);
+    const blob = new Blob([jsonText], { type: "application/json; charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
+    link.href = objectUrl;
+    link.download = `proxira-records-${fileToken}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    message.value = `导出成功，共 ${payload.total} 条`;
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : "导出失败";
+  } finally {
+    exporting.value = false;
+  }
+};
+
 onMounted(async () => {
   try {
     await Promise.all([fetchConfig(), fetchRecords()]);
@@ -273,9 +360,6 @@ onBeforeUnmount(() => {
       <div>
         <p class="kicker">Proxy Inspector</p>
         <h1 class="title">Proxira 管理面板</h1>
-        <p class="project-summary">
-          轻量化实时请求代理工具：本地转发请求并可视化查看请求与响应参数，帮助你快速联调接口。
-        </p>
       </div>
       <div class="status-group">
         <span class="badge" :data-state="connectionState">{{ connectionLabel }}</span>
@@ -312,7 +396,12 @@ onBeforeUnmount(() => {
       <aside class="card list-panel">
         <div class="panel-head">
           <h2 class="section-title">历史请求</h2>
-          <span class="panel-meta">最新优先</span>
+          <div class="panel-actions">
+            <span class="panel-meta">最新优先</span>
+            <button class="button button-ghost panel-button" :disabled="exporting" @click="exportRecords">
+              {{ exporting ? "导出中..." : "导出 JSON" }}
+            </button>
+          </div>
         </div>
 
         <p v-if="!hasRecords" class="empty">还没有请求记录。</p>
@@ -354,74 +443,157 @@ onBeforeUnmount(() => {
         <p v-if="!selectedRecord" class="empty">请选择一条请求记录查看详情。</p>
 
         <template v-else>
-          <header class="detail-head">
-            <h2 class="detail-title">{{ selectedRecord.method }} {{ selectedRecord.path }}</h2>
-            <div class="chips">
-              <span class="chip">状态: {{ detailStatusLabel }}</span>
-              <span class="chip">耗时: {{ formatDuration(selectedRecord.durationMs) }}</span>
-              <span class="chip">时间: {{ formatTime(selectedRecord.timestamp) }}</span>
+          <div class="detail-layout">
+            <header class="detail-head">
+              <div class="detail-head-row">
+                <h2 class="detail-title">{{ selectedRecord.method }} {{ selectedRecord.path }}</h2>
+                <div class="detail-head-actions">
+                  <button
+                    class="mini-button"
+                    type="button"
+                    @click="copyText('URL', selectedRecord.upstreamUrl)"
+                  >
+                    复制 URL
+                  </button>
+                  <button
+                    class="mini-button"
+                    type="button"
+                    @click="copyText('cURL', buildCurlCommand(selectedRecord))"
+                  >
+                    复制 cURL
+                  </button>
+                </div>
+              </div>
+              <div class="chips">
+                <span class="chip">状态: {{ detailStatusLabel }}</span>
+                <span class="chip">耗时: {{ formatDuration(selectedRecord.durationMs) }}</span>
+                <span class="chip">时间: {{ formatTime(selectedRecord.timestamp) }}</span>
+              </div>
+            </header>
+
+            <div class="detail-split">
+              <section class="detail-column">
+                <p class="detail-column-title">请求内容</p>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Query Params</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Query Params', toPrettyJson(selectedRecord.query))"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <JsonPretty class="json-view" :data="selectedRecord.query" />
+                </article>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Request Headers</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Request Headers', toPrettyJson(selectedRecord.requestHeaders))"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
+                </article>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Request Body</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Request Body', bodyViewToCopyText(requestBodyView))"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <JsonPretty
+                    v-if="requestBodyView.mode === 'json'"
+                    class="json-view"
+                    :data="requestBodyView.jsonData as any"
+                  />
+                  <pre v-else>{{ requestBodyView.mode === 'text' ? requestBodyView.text : requestBodyView.note }}</pre>
+                  <p v-if="requestBodyView.note && requestBodyView.mode !== 'empty'" class="sub-note">
+                    {{ requestBodyView.note }}
+                  </p>
+                </article>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Upstream</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Upstream URL', selectedRecord.upstreamUrl)"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <pre>{{ selectedRecord.upstreamUrl }}</pre>
+                </article>
+              </section>
+
+              <section class="detail-column">
+                <p class="detail-column-title">响应内容</p>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Response Headers</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Response Headers', toPrettyJson(selectedRecord.responseHeaders))"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
+                </article>
+
+                <article class="detail-card">
+                  <div class="detail-card-head">
+                    <h3>Response Body</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Response Body', bodyViewToCopyText(responseBodyView))"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <JsonPretty
+                    v-if="responseBodyView.mode === 'json'"
+                    class="json-view"
+                    :data="responseBodyView.jsonData as any"
+                  />
+                  <pre v-else>{{ responseBodyView.mode === 'text' ? responseBodyView.text : responseBodyView.note }}</pre>
+                  <p v-if="responseBodyView.note && responseBodyView.mode !== 'empty'" class="sub-note">
+                    {{ responseBodyView.note }}
+                  </p>
+                </article>
+
+                <article v-if="selectedRecord.error" class="detail-card detail-error">
+                  <div class="detail-card-head">
+                    <h3>Error</h3>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('Error', selectedRecord.error)"
+                    >
+                      复制
+                    </button>
+                  </div>
+                  <pre>{{ selectedRecord.error }}</pre>
+                </article>
+              </section>
             </div>
-          </header>
-
-          <div class="detail-split">
-            <section class="detail-column">
-              <p class="detail-column-title">请求内容</p>
-
-              <article class="detail-card">
-                <h3>Query Params</h3>
-                <JsonPretty class="json-view" :data="selectedRecord.query" />
-              </article>
-
-              <article class="detail-card">
-                <h3>Request Headers</h3>
-                <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
-              </article>
-
-              <article class="detail-card">
-                <h3>Request Body</h3>
-                <JsonPretty
-                  v-if="requestBodyView.mode === 'json'"
-                  class="json-view"
-                  :data="requestBodyView.jsonData as any"
-                />
-                <pre v-else>{{ requestBodyView.mode === 'text' ? requestBodyView.text : requestBodyView.note }}</pre>
-                <p v-if="requestBodyView.note && requestBodyView.mode !== 'empty'" class="sub-note">
-                  {{ requestBodyView.note }}
-                </p>
-              </article>
-
-              <article class="detail-card">
-                <h3>Upstream</h3>
-                <pre>{{ selectedRecord.upstreamUrl }}</pre>
-              </article>
-            </section>
-
-            <section class="detail-column">
-              <p class="detail-column-title">响应内容</p>
-
-              <article class="detail-card">
-                <h3>Response Headers</h3>
-                <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
-              </article>
-
-              <article class="detail-card">
-                <h3>Response Body</h3>
-                <JsonPretty
-                  v-if="responseBodyView.mode === 'json'"
-                  class="json-view"
-                  :data="responseBodyView.jsonData as any"
-                />
-                <pre v-else>{{ responseBodyView.mode === 'text' ? responseBodyView.text : responseBodyView.note }}</pre>
-                <p v-if="responseBodyView.note && responseBodyView.mode !== 'empty'" class="sub-note">
-                  {{ responseBodyView.note }}
-                </p>
-              </article>
-
-              <article v-if="selectedRecord.error" class="detail-card detail-error">
-                <h3>Error</h3>
-                <pre>{{ selectedRecord.error }}</pre>
-              </article>
-            </section>
           </div>
         </template>
       </section>

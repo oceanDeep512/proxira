@@ -14,6 +14,8 @@ Proxira 是一个轻量化请求转发工具，主要用于本地开发联调。
 - 请求透明转发（path / query / header / cookie / body）
 - Web 面板实时展示请求记录
 - SSE 实时推送最新请求
+- 历史请求支持一键导出 JSON
+- 详情支持一键复制 URL / Headers / Body / cURL
 - 支持按记录查看、删除、清空
 - 支持通过 UI 动态切换上游地址
 
@@ -68,6 +70,7 @@ npx proxira --port 3010 --target http://localhost:8080
 - `GET /_proxira/api/config`：获取当前上游配置
 - `PUT /_proxira/api/config`：更新上游配置
 - `GET /_proxira/api/records`：分页查询记录
+- `GET /_proxira/api/records/export`：导出当前记录为 JSON
 - `GET /_proxira/api/records/:id`：查看单条记录
 - `DELETE /_proxira/api/records/:id`：删除单条记录
 - `DELETE /_proxira/api/records`：清空记录
@@ -79,6 +82,7 @@ npx proxira --port 3010 --target http://localhost:8080
 - `PROXY_TARGET_URL`：默认上游地址（默认 `http://localhost:8080`）
 - `PROXY_DATA_DIR`：配置文件存储目录（默认 `./.proxira`）
 - `PROXY_BODY_LIMIT`：记录体截断大小（默认 `32768` 字节）
+- `PROXY_HISTORY_LIMIT`：内存历史记录上限（默认 `1000`）
 - `PROXY_QUERY_LIMIT_MAX`：历史记录接口最大分页值（默认 `500`）
 - `PROXY_SSE_HEARTBEAT_MS`：SSE 心跳毫秒（默认 `15000`）
 - `PROXY_DISABLE_BANNER=1`：关闭启动 Banner

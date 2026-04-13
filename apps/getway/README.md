@@ -1,85 +1,95 @@
-# Proxira CLI（apps/getway）
+# Proxira
 
-`apps/getway` 是 Proxira 的后端代理服务，同时也是可发布的 npm CLI 包（包名：`proxira`）。
+Proxira 是一个轻量化本地请求转发工具，适合开发联调时查看 SDK 请求参数、响应内容和耗时。
 
-## 功能职责
+## 安装与启动
 
-- 启动本地代理端口
-- 转发请求到真实上游服务
-- 提供 `/_proxira/api/*` 管理接口
-- 托管打包后的 Dashboard 静态资源（`/_proxira/ui`）
-
-## 常用命令
-
-在仓库根目录执行：
+### 方式 1：使用 npx（推荐，无需全局安装）
 
 ```bash
-# 开发模式（监听源码）
-pnpm --filter ./apps/getway dev
-
-# 构建后端
-pnpm --filter ./apps/getway build
-
-# 构建可发布包（包含 dashboard 静态资源）
-pnpm --filter ./apps/getway build:pkg
-
-# 打包 npm tarball
-pnpm --filter ./apps/getway pack:pkg
+npx proxira
 ```
 
-## CLI 用法
+### 方式 2：全局安装后使用
 
 ```bash
-proxira --help
-proxira --port 3010 --target http://localhost:8080
-proxira start -p 3001 -d ./.proxira
+npm i -g proxira
+proxira
 ```
 
-参数说明：
+启动后默认地址：
 
-- `-p, --port <port>`：代理服务端口，默认 `3000`
-- `-t, --target <url>`：上游服务地址
-- `-d, --data-dir <path>`：配置数据目录
+- 代理地址：`http://localhost:3000`
+- 管理面板：`http://localhost:3000/_proxira/ui`
+
+## 命令格式
+
+```bash
+proxira [options]
+```
+
+可用参数：
+
+- `-p, --port <port>`：代理端口（默认 `3000`）
+- `-t, --target <url>`：上游服务地址（默认 `http://localhost:8080`）
+- `-d, --data-dir <path>`：配置目录（默认 `./.proxira`）
 - `--no-banner`：关闭启动 Banner
 - `-h, --help`：查看帮助
 - `-v, --version`：查看版本
 
-## 启动后会显示的中文提示
+## 使用示例
 
-服务启动后 CLI 会展示一段中文引导，包含：
-
-- 如何让 SDK/应用接入代理端口
-- 管理面板访问地址
-- 当前上游地址说明
-- 常用 CLI 示例
-- “仅建议本地开发使用”的提醒
-
-## 管理接口
-
-- `GET /_proxira/api/health`
-- `GET /_proxira/api/status`
-- `GET /_proxira/api/config`
-- `PUT /_proxira/api/config`
-- `GET /_proxira/api/records`
-- `GET /_proxira/api/records/:id`
-- `DELETE /_proxira/api/records/:id`
-- `DELETE /_proxira/api/records`
-- `GET /_proxira/api/events`（SSE）
-
-## 数据与目录
-
-- 配置文件：默认写入 `./.proxira/config.json`
-- 请求历史：当前保存在内存中，进程重启后清空
-- 静态面板：发布时同步到 `apps/getway/dashboard-dist`
-
-## 发布说明
+### 1) 最简单启动
 
 ```bash
-pnpm --filter ./apps/getway build:pkg
-pnpm --filter ./apps/getway pack:pkg
+npx proxira
 ```
 
-产物中包含：
+将你的 SDK 或应用请求地址指向 `http://localhost:3000`，然后在面板查看请求与响应详情。
 
-- `dist/*`（CLI 和服务端）
-- `dashboard-dist/*`（前端构建资源）
+### 2) 指定端口和上游
+
+```bash
+npx proxira --port 3010 --target http://localhost:8080
+```
+
+此时代理入口变为 `http://localhost:3010`，所有请求会转发到 `http://localhost:8080`。
+
+### 3) 仅使用 proxira + 参数启动
+
+```bash
+proxira -p 3001 -t http://localhost:8080
+```
+
+### 4) 指定配置目录
+
+```bash
+proxira --data-dir ./.proxira-dev
+```
+
+### 5) 关闭 Banner，适合脚本或日志收集
+
+```bash
+proxira --no-banner
+```
+
+## 推荐使用流程
+
+1. 启动 Proxira。
+2. 将待联调请求指向 Proxira 端口。
+3. 打开 `/_proxira/ui` 实时查看请求与响应。
+4. 在面板中按需调整上游地址继续联调。
+
+## 面板实用能力
+
+- 历史请求支持一键导出 JSON
+- 详情支持一键复制 URL / Headers / Body / cURL
+
+## 可选环境变量
+
+- `PROXY_HISTORY_LIMIT`：内存历史记录上限，默认 `1000`
+
+## 注意事项
+
+- 该工具定位为本地开发调试工具。
+- 默认会记录请求与响应内容，请注意敏感信息处理。

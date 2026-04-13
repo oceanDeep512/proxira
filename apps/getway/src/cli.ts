@@ -35,23 +35,29 @@ const printHelp = (): void => {
   const usage = [
     logo,
     "",
-    `${chalk.bold("Proxira CLI")}`,
+    `${chalk.bold("Proxira 命令行工具")}`,
     "",
-    `${chalk.bold("Usage")}`,
-    "  proxira [start] [options]",
+    `${chalk.bold("用法")}`,
+    "  proxira [options]",
     "",
-    `${chalk.bold("Options")}`,
-    "  -p, --port <port>          Proxy service port (default: 3000)",
-    "  -t, --target <url>         Upstream target base URL",
-    "  -d, --data-dir <path>      Data directory for config file",
-    "      --no-banner            Disable fancy startup banner",
-    "  -h, --help                 Show this help",
-    "  -v, --version              Show CLI version",
+    `${chalk.bold("参数说明")}`,
+    "  -p, --port <port>          代理服务端口，默认 3000",
+    "  -t, --target <url>         上游服务地址（例如 http://localhost:8080）",
+    "  -d, --data-dir <path>      配置目录（默认 ./.proxira）",
+    "      --no-banner            关闭启动 Banner 输出",
+    "  -h, --help                 查看帮助信息",
+    "  -v, --version              查看当前 CLI 版本",
     "",
-    `${chalk.bold("Examples")}`,
+    `${chalk.bold("参数传递方式")}`,
+    "  --port 3010                使用空格传值",
+    "  --port=3010                使用等号传值",
+    "  --target http://x.x.x.x    URL 推荐使用完整协议头（http/https）",
+    "",
+    `${chalk.bold("示例")}`,
     "  proxira",
     "  proxira --port 3010 --target http://localhost:8080",
-    "  proxira start -p 3001 -d ./.proxira",
+    "  proxira --port=3010 --target=http://localhost:8080",
+    "  proxira -p 3001 -d ./.proxira",
   ].join("\n");
 
   console.log(
@@ -64,9 +70,7 @@ const printHelp = (): void => {
 };
 
 const parseFlags = (argv: string[]): CliFlags => {
-  const normalized = (argv[0] === "start" ? argv.slice(1) : argv).filter(
-    (token) => token !== "--",
-  );
+  const normalized = argv.filter((token) => token !== "--");
   const flags: CliFlags = {
     help: false,
     version: false,
@@ -76,7 +80,7 @@ const parseFlags = (argv: string[]): CliFlags => {
   const readNext = (index: number, key: string): string => {
     const value = normalized[index + 1];
     if (!value || value.startsWith("-")) {
-      throw new Error(`Missing value for ${key}`);
+      throw new Error(`参数 ${key} 缺少值`);
     }
     return value;
   };
@@ -127,7 +131,7 @@ const parseFlags = (argv: string[]): CliFlags => {
       continue;
     }
 
-    throw new Error(`Unknown option: ${token}`);
+    throw new Error(`未知参数: ${token}`);
   }
 
   return flags;
@@ -164,7 +168,7 @@ const run = async (): Promise<void> => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(chalk.red(`[proxira] ${message}`));
-    console.error(chalk.gray("Run `proxira --help` to inspect available options."));
+    console.error(chalk.gray("可执行 `proxira --help` 查看完整中文参数说明。"));
     process.exitCode = 1;
   }
 };

@@ -38,6 +38,12 @@ export interface ProxyRecordsResponse {
   offset: number;
 }
 
+export interface ProxyRecordsExportResponse {
+  exportedAt: string;
+  total: number;
+  items: ProxyTrafficRecord[];
+}
+
 export interface ProxyRecordDetailResponse {
   item: ProxyTrafficRecord | null;
 }
