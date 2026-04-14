@@ -12,9 +12,11 @@ type CliFlags = {
   help: boolean;
   version: boolean;
   noBanner: boolean;
+  noPrefix: boolean;
   port?: string;
   target?: string;
   dataDir?: string;
+  prefix?: string;
 };
 
 const CLI_VERSION = (() => {
@@ -47,7 +49,9 @@ const printHelp = (): void => {
     "  -p, --port <port>          代理服务端口，默认 3000",
     "  -t, --target <url>         上游服务地址（例如 http://localhost:8080）",
     "  -d, --data-dir <path>      配置目录（默认 ./.proxira）",
-    "      --no-banner            关闭启动 Banner 输出",
+    "  -x, --prefix <path>        自定义代理前缀，默认 /proxira",
+    "  -nx, --no-prefix            关闭代理前缀，直接转发非 /_proxira 请求",
+    "  -b, --no-banner            关闭启动 Banner 输出",
     "  -h, --help                 查看帮助信息",
     "  -v, --version              查看当前 CLI 版本",
     "",
@@ -58,11 +62,15 @@ const printHelp = (): void => {
     "  --port 3010                使用空格传值",
     "  --port=3010                使用等号传值",
     "  --target http://x.x.x.x    URL 推荐使用完整协议头（http/https）",
+    "  -x /debug-proxy            前缀支持自定义，自动补齐开头 /",
     "",
     `${chalk.bold("示例")}`,
     "  proxira",
     "  proxira --port 3010 --target http://localhost:8080",
-    "  # 业务请求需走 /proxira 前缀，例如：http://localhost:3010/proxira/api/users",
+    "  # 默认业务请求需走 /proxira 前缀，例如：http://localhost:3010/proxira/api/users",
+    "  proxira -x /debug-proxy --target http://localhost:8080",
+    "  proxira -nx --target http://localhost:8080",
+    "  proxira -b -p 3010 -t http://localhost:8080",
     "  proxira --port=3010 --target=http://localhost:8080",
     "  proxira -p 3001 -d ./.proxira",
     "  proxira clear-cache",
@@ -85,10 +93,13 @@ const parseFlags = (argv: string[]): CliFlags => {
     help: false,
     version: false,
     noBanner: false,
+    noPrefix: false,
   };
 
   const normalized =
-    normalizedInput[0] === "clear-cache" ? normalizedInput.slice(1) : normalizedInput;
+    normalizedInput[0] === "clear-cache"
+      ? normalizedInput.slice(1)
+      : normalizedInput;
   if (normalizedInput[0] === "clear-cache") {
     flags.mode = "clear-cache";
   }
@@ -121,9 +132,14 @@ const parseFlags = (argv: string[]): CliFlags => {
       flags.version = true;
       continue;
     }
-    if (token === "--no-banner") {
+    if (token === "-b" || token === "--no-banner") {
       ensureServeOnly(token);
       flags.noBanner = true;
+      continue;
+    }
+    if (token === "-nx" || token === "--no-prefix") {
+      ensureServeOnly(token);
+      flags.noPrefix = true;
       continue;
     }
     if (token === "-p" || token === "--port") {
@@ -148,6 +164,17 @@ const parseFlags = (argv: string[]): CliFlags => {
       flags.target = token.slice("--target=".length);
       continue;
     }
+    if (token === "-x" || token === "--prefix") {
+      ensureServeOnly(token);
+      flags.prefix = readNext(index, token);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--prefix=")) {
+      ensureServeOnly("--prefix");
+      flags.prefix = token.slice("--prefix=".length);
+      continue;
+    }
     if (token === "-d" || token === "--data-dir") {
       flags.dataDir = readNext(index, token);
       index += 1;
@@ -159,6 +186,10 @@ const parseFlags = (argv: string[]): CliFlags => {
     }
 
     throw new Error(`未知参数: ${token}`);
+  }
+
+  if (flags.noPrefix && flags.prefix !== undefined) {
+    throw new Error("不能同时传递 --no-prefix 和 --prefix");
   }
 
   return flags;
@@ -200,6 +231,12 @@ const run = async (): Promise<void> => {
     }
     if (flags.dataDir) {
       process.env.PROXY_DATA_DIR = flags.dataDir;
+    }
+    if (flags.noPrefix) {
+      process.env.PROXY_PREFIX_ENABLED = "0";
+    }
+    if (flags.prefix) {
+      process.env.PROXY_PREFIX = flags.prefix;
     }
     if (flags.noBanner) {
       process.env.PROXY_DISABLE_BANNER = "1";

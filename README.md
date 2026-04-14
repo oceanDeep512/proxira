@@ -64,7 +64,7 @@ pnpm run start:app
 
 启动后访问：
 
-- 代理入口：`http://localhost:3000/proxira`
+- 代理入口：`http://localhost:3000/proxira`（默认）
 - 管理面板：`http://localhost:3000/_proxira/ui`
 - 健康检查：`http://localhost:3000/_proxira/api/health`
 
@@ -73,6 +73,8 @@ pnpm run start:app
 ```bash
 npx proxira --help
 npx proxira --port 3010 --target http://localhost:8080
+npx proxira -x /debug-proxy --target http://localhost:8080
+npx proxira -X --target http://localhost:8080
 ```
 
 ## 常用开发命令
@@ -93,7 +95,7 @@ pnpm run pack:cli
 
 ## 推荐使用流程
 
-1. 将业务请求指向 Proxira 代理入口（如 `http://localhost:3000/proxira`）。
+1. 将业务请求指向 Proxira 代理入口（默认如 `http://localhost:3000/proxira`，也可通过 CLI 自定义或关闭前缀）。
 2. 打开 Dashboard 观察实时请求列表。
 3. 通过过滤与排序快速定位目标请求。
 4. 在详情区检查 Query / Headers / Body / Response / Error。
@@ -122,6 +124,8 @@ pnpm run pack:cli
 - `PORT`：服务端口（默认 `3000`）
 - `PROXY_TARGET_URL`：默认分组上游地址（默认 `http://localhost:8080`）
 - `PROXY_DATA_DIR`：本地数据目录（默认 `./.proxira`）
+- `PROXY_PREFIX`：代理请求前缀（默认 `/proxira`）
+- `PROXY_PREFIX_ENABLED=0`：关闭代理请求前缀
 - `PROXY_BODY_LIMIT`：请求/响应体截断大小
 - `PROXY_HISTORY_LIMIT`：内存历史记录上限
 - `PROXY_HISTORY_PERSIST_LIMIT`：持久化历史记录上限
@@ -133,3 +137,4 @@ pnpm run pack:cli
 
 - Proxira 定位为本地联调工具，请勿直接暴露公网使用。
 - 默认会记录请求与响应内容，涉及敏感数据时请谨慎处理。
+- 管理面板和内部 API 固定保留在 `/_proxira/*`，自定义前缀仅影响业务代理入口。

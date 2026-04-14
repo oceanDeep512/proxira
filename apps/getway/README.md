@@ -19,7 +19,7 @@ proxira
 
 启动后默认地址：
 
-- 代理入口：`http://localhost:3000/proxira`
+- 代理入口：`http://localhost:3000/proxira`（默认）
 - 管理面板：`http://localhost:3000/_proxira/ui`
 
 ## 命令格式
@@ -33,7 +33,9 @@ proxira [options]
 - `-p, --port <port>`：代理端口（默认 `3000`）
 - `-t, --target <url>`：上游服务地址（默认 `http://localhost:8080`）
 - `-d, --data-dir <path>`：配置目录（默认 `./.proxira`）
-- `--no-banner`：关闭启动 Banner
+- `-x, --prefix <path>`：自定义代理前缀（默认 `/proxira`）
+- `-X, --no-prefix`：关闭代理前缀，直接转发非 `/_proxira/*` 请求
+- `-b, --no-banner`：关闭启动 Banner
 - `-h, --help`：查看帮助
 - `-v, --version`：查看版本
 
@@ -45,7 +47,7 @@ proxira [options]
 npx proxira
 ```
 
-将你的 SDK 或应用请求地址指向 `http://localhost:3000`，然后在面板查看请求与响应详情。
+将你的 SDK 或应用请求地址指向 `http://localhost:3000/proxira`，然后在面板查看请求与响应详情。
 
 ### 2) 指定端口和上游
 
@@ -55,22 +57,38 @@ npx proxira --port 3010 --target http://localhost:8080
 
 此时代理入口变为 `http://localhost:3010/proxira`，所有请求会转发到 `http://localhost:8080`。
 
-### 3) 仅使用 proxira + 参数启动
+### 3) 自定义代理前缀
+
+```bash
+proxira -x /debug-proxy -t http://localhost:8080
+```
+
+此时代理入口变为 `http://localhost:3000/debug-proxy`。
+
+### 4) 关闭代理前缀
+
+```bash
+proxira -X -t http://localhost:8080
+```
+
+此时除 `/_proxira/*` 之外的请求都会直接转发到上游。
+
+### 5) 仅使用 proxira + 参数启动
 
 ```bash
 proxira -p 3001 -t http://localhost:8080
 ```
 
-### 4) 指定配置目录
+### 6) 指定配置目录
 
 ```bash
 proxira --data-dir ./.proxira-dev
 ```
 
-### 5) 关闭 Banner，适合脚本或日志收集
+### 7) 关闭 Banner，适合脚本或日志收集
 
 ```bash
-proxira --no-banner
+proxira -b
 ```
 
 ## 推荐使用流程
@@ -88,6 +106,8 @@ proxira --no-banner
 
 ## 可选环境变量
 
+- `PROXY_PREFIX`：代理请求前缀，默认 `/proxira`
+- `PROXY_PREFIX_ENABLED=0`：关闭代理请求前缀
 - `PROXY_HISTORY_LIMIT`：内存历史记录上限，默认 `1000`
 - `PROXY_HISTORY_PERSIST_LIMIT`：本地持久化时每个分组保留最近 N 条，默认 `200`（且不超过 `PROXY_HISTORY_LIMIT`）
 
@@ -95,3 +115,4 @@ proxira --no-banner
 
 - 该工具定位为本地开发调试工具。
 - 默认会记录请求与响应内容，请注意敏感信息处理。
+- 管理面板和内部 API 固定使用 `/_proxira/*`，自定义前缀只影响业务代理入口。
