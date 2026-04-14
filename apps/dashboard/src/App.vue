@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import JsonPretty from "vue-json-pretty";
+import SimpleBar from "simplebar-vue";
 import GroupPicker from "./components/GroupPicker.vue";
 import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
@@ -71,7 +72,8 @@ const STATUS_FILTER_OPTIONS = [
   { value: "ERROR", label: "ERR 异常", hint: "代理或网络失败" },
 ] as const;
 const SORT_OPTIONS = [
-  { value: "latest", label: "最新优先", hint: "按请求时间倒序" },
+  { value: "time_desc", label: "时间从新到旧", hint: "按请求时间倒序" },
+  { value: "time_asc", label: "时间从旧到新", hint: "按请求时间正序" },
   { value: "duration_desc", label: "耗时从高到低", hint: "优先查看慢请求" },
   { value: "duration_asc", label: "耗时从低到高", hint: "优先查看快请求" },
 ] as const;
@@ -83,7 +85,7 @@ type StatusTone = "success" | "redirect" | "client" | "server" | "error" | "pend
 
 const methodFilter = ref<MethodFilter>("ALL");
 const statusFilter = ref<StatusFilter>("ALL");
-const sortMode = ref<SortMode>("latest");
+const sortMode = ref<SortMode>("time_desc");
 const requestBodyExpanded = ref(false);
 const responseBodyExpanded = ref(false);
 
@@ -120,6 +122,11 @@ const filteredRecords = computed(() => {
     items.sort((left, right) => right.durationMs - left.durationMs);
   } else if (sortMode.value === "duration_asc") {
     items.sort((left, right) => left.durationMs - right.durationMs);
+  } else if (sortMode.value === "time_asc") {
+    items.sort(
+      (left, right) =>
+        new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
+    );
   } else {
     items.sort(
       (left, right) =>
@@ -393,7 +400,7 @@ const resolveStatusTone = (status: number | null, error: string | null): StatusT
 const resetFilters = (): void => {
   methodFilter.value = "ALL";
   statusFilter.value = "ALL";
-  sortMode.value = "latest";
+  sortMode.value = "time_desc";
 };
 
 const isMethodFilter = (value: string): value is MethodFilter =>
@@ -1068,37 +1075,39 @@ onBeforeUnmount(() => {
 
           <p v-if="!hasRecords" class="empty">{{ emptyRecordsLabel }}</p>
 
-          <ul v-else class="record-list">
-            <li v-for="record in filteredRecords" :key="record.id">
-              <article
-                class="record-item"
-                :class="{ active: selectedRecord?.id === record.id }"
-                @click="onSelectRecord(record.id)"
-              >
-                <div class="record-line">
-                  <span class="method">{{ record.method }}</span>
-                  <div class="record-actions">
-                    <span class="status" :data-tone="resolveStatusTone(record.responseStatus, record.error)">
-                      {{ record.responseStatus ?? "ERR" }}
-                    </span>
-                    <button
-                      class="record-delete"
-                      type="button"
-                      :disabled="deletingRecordId === record.id"
-                      @click.stop="removeRecord(record.id)"
-                    >
-                      {{ deletingRecordId === record.id ? "删除中" : "删除" }}
-                    </button>
+          <SimpleBar v-else class="record-list-scroll">
+            <ul class="record-list">
+              <li v-for="record in filteredRecords" :key="record.id">
+                <article
+                  class="record-item"
+                  :class="{ active: selectedRecord?.id === record.id }"
+                  @click="onSelectRecord(record.id)"
+                >
+                  <div class="record-line">
+                    <span class="method">{{ record.method }}</span>
+                    <div class="record-actions">
+                      <span class="status" :data-tone="resolveStatusTone(record.responseStatus, record.error)">
+                        {{ record.responseStatus ?? "ERR" }}
+                      </span>
+                      <button
+                        class="record-delete"
+                        type="button"
+                        :disabled="deletingRecordId === record.id"
+                        @click.stop="removeRecord(record.id)"
+                      >
+                        {{ deletingRecordId === record.id ? "删除中" : "删除" }}
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <code class="path">{{ record.path }}</code>
-                <div class="record-line meta">
-                  <span class="duration">{{ formatDuration(record.durationMs) }}</span>
-                  <span>{{ formatTime(record.timestamp) }}</span>
-                </div>
-              </article>
-            </li>
-          </ul>
+                  <code class="path">{{ record.path }}</code>
+                  <div class="record-line meta">
+                    <span class="duration">{{ formatDuration(record.durationMs) }}</span>
+                    <span>{{ formatTime(record.timestamp) }}</span>
+                  </div>
+                </article>
+              </li>
+            </ul>
+          </SimpleBar>
         </aside>
       </aside>
 
@@ -1180,8 +1189,9 @@ onBeforeUnmount(() => {
               </header>
 
               <div class="detail-split">
-                <section class="detail-column">
-                  <p class="detail-column-title">请求内容</p>
+                <SimpleBar class="detail-column-scroll">
+                  <section class="detail-column">
+                    <p class="detail-column-title">请求内容</p>
 
                   <article class="detail-card">
                     <div class="detail-card-head">
@@ -1246,9 +1256,11 @@ onBeforeUnmount(() => {
                     </p>
                   </article>
 
-                </section>
+                  </section>
+                </SimpleBar>
 
-                <section class="detail-column">
+                <SimpleBar class="detail-column-scroll">
+                  <section class="detail-column">
                   <p class="detail-column-title">响应内容</p>
 
                   <article class="detail-card">
@@ -1313,7 +1325,8 @@ onBeforeUnmount(() => {
                     </div>
                     <pre>{{ selectedRecord.error }}</pre>
                   </article>
-                </section>
+                  </section>
+                </SimpleBar>
               </div>
             </div>
           </template>
