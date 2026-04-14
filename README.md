@@ -64,6 +64,7 @@ pnpm run start:app
 
 启动后访问：
 
+- 代理入口：`http://localhost:3000/proxira`
 - 管理面板：`http://localhost:3000/_proxira/ui`
 - 健康检查：`http://localhost:3000/_proxira/api/health`
 
@@ -92,7 +93,7 @@ pnpm run pack:cli
 
 ## 推荐使用流程
 
-1. 将业务请求指向 Proxira 端口（如 `http://localhost:3000`）。
+1. 将业务请求指向 Proxira 代理入口（如 `http://localhost:3000/proxira`）。
 2. 打开 Dashboard 观察实时请求列表。
 3. 通过过滤与排序快速定位目标请求。
 4. 在详情区检查 Query / Headers / Body / Response / Error。

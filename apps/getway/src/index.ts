@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import boxen from "boxen";
 import chalk from "chalk";
 import { existsSync } from "node:fs";
@@ -696,10 +696,11 @@ const hydrateState = async (): Promise<void> => {
 
 const printStartupTips = (port: number): void => {
   const proxyUrl = `http://localhost:${port}`;
+  const proxyEntryUrl = `${proxyUrl}/proxira`;
   const dashboardUrl = `${proxyUrl}/_proxira/ui`;
   const tips = [
     chalk.bold("使用说明"),
-    `1) 将你要联调的 SDK/应用请求地址指向 ${chalk.cyan(proxyUrl)}`,
+    `1) 将你要联调的 SDK/应用请求地址指向 ${chalk.cyan(proxyEntryUrl)}（必须带 /proxira 前缀）`,
     `2) 在浏览器打开 ${chalk.cyan(dashboardUrl)} 查看请求和响应详情`,
     `3) 通过面板可修改上游地址，当前生效值为 ${chalk.green(proxyConfig.targetBaseUrl)}`,
     `4) 仅建议本地开发使用，请勿直接暴露到公网`,
@@ -746,7 +747,7 @@ const printStartupInfo = (port: number): void => {
   const summary = [
     logo,
     "",
-    `${chalk.bold("Proxy")}: ${chalk.cyan(proxyUrl)}`,
+    `${chalk.bold("Proxy")}: ${chalk.cyan(proxyUrl)}${chalk.cyan("/proxira")}`,
     `${chalk.bold("Dashboard")}: ${
       dashboardDistDir
         ? chalk.cyan(dashboardUrl)
@@ -1175,9 +1176,30 @@ app.get("/_proxira/ui/*", async (c) => {
 
 app.all("/_proxira/*", (c) => c.notFound());
 
-app.all("*", async (c) => {
+const proxyPrefix = "/proxira";
+
+const buildProxyIncomingUrl = (rawUrl: string): URL | null => {
+  const incomingUrl = new URL(rawUrl);
+  if (!incomingUrl.pathname.startsWith(proxyPrefix)) {
+    return null;
+  }
+
+  const nextPath = incomingUrl.pathname.slice(proxyPrefix.length);
+  incomingUrl.pathname = nextPath.startsWith("/") ? nextPath : `/${nextPath}`;
+  if (incomingUrl.pathname.length === 0) {
+    incomingUrl.pathname = "/";
+  }
+
+  return incomingUrl;
+};
+
+const handleProxyForward = async (c: Context) => {
   const startedAtMs = Date.now();
-  const incomingUrl = new URL(c.req.url);
+  const incomingUrl = buildProxyIncomingUrl(c.req.url);
+  if (!incomingUrl) {
+    return c.notFound();
+  }
+
   const activeGroup = ensureActiveGroup();
   if (!activeGroup) {
     return c.json({ message: "No active group configured." }, 500);
@@ -1318,7 +1340,10 @@ app.all("*", async (c) => {
 
     return c.json({ message: "Proxy forwarding failed.", error: message }, 502);
   }
-});
+};
+
+app.all("/proxira", handleProxyForward);
+app.all("/proxira/*", handleProxyForward);
 
 const bootstrap = async (): Promise<void> => {
   await hydrateState();

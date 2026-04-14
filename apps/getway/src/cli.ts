@@ -62,6 +62,7 @@ const printHelp = (): void => {
     `${chalk.bold("示例")}`,
     "  proxira",
     "  proxira --port 3010 --target http://localhost:8080",
+    "  # 业务请求需走 /proxira 前缀，例如：http://localhost:3010/proxira/api/users",
     "  proxira --port=3010 --target=http://localhost:8080",
     "  proxira -p 3001 -d ./.proxira",
     "  proxira clear-cache",

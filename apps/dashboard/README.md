@@ -24,6 +24,7 @@ pnpm --filter @proxira/dashboard dev
 开发代理行为：
 
 - `/_proxira/*` 会代理到 `http://127.0.0.1:3000`
+- 业务请求转发入口为 `/proxira/*`（例如 `/proxira/api/users`）
 - 可通过 `VITE_PROXY_DEV_TARGET` 修改后端地址
 
 示例：

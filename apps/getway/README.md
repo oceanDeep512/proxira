@@ -19,7 +19,7 @@ proxira
 
 启动后默认地址：
 
-- 代理地址：`http://localhost:3000`
+- 代理入口：`http://localhost:3000/proxira`
 - 管理面板：`http://localhost:3000/_proxira/ui`
 
 ## 命令格式
@@ -53,7 +53,7 @@ npx proxira
 npx proxira --port 3010 --target http://localhost:8080
 ```
 
-此时代理入口变为 `http://localhost:3010`，所有请求会转发到 `http://localhost:8080`。
+此时代理入口变为 `http://localhost:3010/proxira`，所有请求会转发到 `http://localhost:8080`。
 
 ### 3) 仅使用 proxira + 参数启动
 
