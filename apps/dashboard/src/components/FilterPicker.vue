@@ -1,33 +1,35 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
-import type { ProxyGroup } from "@proxira/core";
+
+type PickerOption = {
+  value: string;
+  label: string;
+  hint?: string;
+};
 
 const props = defineProps<{
-  groups: ProxyGroup[];
+  label: string;
   modelValue: string;
-  allowDelete?: boolean;
+  options: readonly PickerOption[];
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
-  "update:modelValue": [id: string];
-  "request-delete": [id: string];
+  "update:modelValue": [value: string];
 }>();
 
-const open = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
 const triggerRef = ref<HTMLButtonElement | null>(null);
 const panelRef = ref<HTMLElement | null>(null);
+const open = ref(false);
 const panelStyle = ref<CSSProperties>({});
 const panelPlacement = ref<"below" | "above">("below");
 
-const hasGroups = computed(() => props.groups.length > 0);
-
-const activeGroup = computed(() => {
-  if (!props.modelValue) {
-    return props.groups[0] ?? null;
-  }
-  return props.groups.find((group) => group.id === props.modelValue) ?? props.groups[0] ?? null;
+const hasOptions = computed(() => props.options.length > 0);
+const isDisabled = computed(() => props.disabled === true || !hasOptions.value);
+const activeOption = computed(() => {
+  return props.options.find((option) => option.value === props.modelValue) ?? props.options[0] ?? null;
 });
 
 const updatePanelPosition = (): void => {
@@ -80,7 +82,7 @@ watch(open, async (isOpen) => {
 });
 
 const toggle = (): void => {
-  if (!hasGroups.value) {
+  if (isDisabled.value) {
     return;
   }
   open.value = !open.value;
@@ -90,23 +92,11 @@ const close = (): void => {
   open.value = false;
 };
 
-const selectGroup = (groupId: string): void => {
-  if (groupId !== props.modelValue) {
-    emit("update:modelValue", groupId);
+const selectOption = (value: string): void => {
+  if (value !== props.modelValue) {
+    emit("update:modelValue", value);
   }
   close();
-};
-
-const requestDelete = (): void => {
-  if (props.allowDelete === false) {
-    return;
-  }
-  const groupId = activeGroup.value?.id;
-  if (!groupId) {
-    return;
-  }
-  close();
-  emit("request-delete", groupId);
 };
 
 const handlePointerDown = (event: MouseEvent): void => {
@@ -142,70 +132,53 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="group-picker" :class="{ open }">
-    <div class="group-trigger-wrap">
-      <button
-        ref="triggerRef"
-        class="group-trigger"
-        :class="{ disabled: !hasGroups }"
-        type="button"
-        :aria-expanded="open"
-        aria-haspopup="listbox"
-        :disabled="!hasGroups"
-        @click="toggle"
-      >
-        <span class="group-trigger-main">
-          <span class="group-prefix">当前分组</span>
-          <span class="group-name">{{ activeGroup?.name ?? "暂无分组" }}</span>
-          <span class="group-target">{{ activeGroup?.targetBaseUrl ?? "-" }}</span>
-        </span>
-        <span class="group-arrow" :class="{ open }" aria-hidden="true">
-          <svg viewBox="0 0 20 20">
-            <path d="M5.2 7.6a.9.9 0 0 1 1.3 0L10 11.1l3.5-3.5a.9.9 0 1 1 1.3 1.3l-4.1 4.1a.9.9 0 0 1-1.3 0L5.2 8.9a.9.9 0 0 1 0-1.3Z" />
-          </svg>
-        </span>
-      </button>
-      <button
-        v-if="allowDelete !== false && activeGroup"
-        class="group-delete round-icon-button"
-        type="button"
-        title="删除当前分组"
-        aria-label="删除当前分组"
-        data-tooltip="删除当前分组"
-        @click.stop="requestDelete"
-      >
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path
-            d="M7.5 2.5h5l.8 1.5H17a.9.9 0 1 1 0 1.8h-.9l-.7 10.2a1.8 1.8 0 0 1-1.8 1.7H6.4a1.8 1.8 0 0 1-1.8-1.7L3.9 5.8H3a.9.9 0 1 1 0-1.8h3.7l.8-1.5Zm-1.8 3.3.7 10.1h7.2l.7-10.1H5.7Zm2.1 1.6c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Zm4.4 0c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Z"
-          />
+  <div ref="rootRef" class="filter-picker" :class="{ open }">
+    <button
+      ref="triggerRef"
+      class="filter-trigger"
+      :class="{ disabled: isDisabled }"
+      type="button"
+      :aria-expanded="open"
+      aria-haspopup="listbox"
+      :disabled="isDisabled"
+      @click="toggle"
+    >
+      <span class="filter-trigger-main">
+        <span class="filter-prefix">{{ label }}</span>
+        <span class="filter-value">{{ activeOption?.label ?? "暂无选项" }}</span>
+        <span class="filter-hint">{{ activeOption?.hint ?? "请选择筛选项" }}</span>
+      </span>
+      <span class="filter-arrow" :class="{ open }" aria-hidden="true">
+        <svg viewBox="0 0 20 20">
+          <path d="M5.2 7.6a.9.9 0 0 1 1.3 0L10 11.1l3.5-3.5a.9.9 0 1 1 1.3 1.3l-4.1 4.1a.9.9 0 0 1-1.3 0L5.2 8.9a.9.9 0 0 1 0-1.3Z" />
         </svg>
-      </button>
-    </div>
+      </span>
+    </button>
 
     <Teleport to="body">
       <Transition name="picker-fade">
         <ul
           v-if="open"
           ref="panelRef"
-          class="group-panel group-panel-layer"
+          class="filter-panel filter-panel-layer"
           :class="{ 'is-above': panelPlacement === 'above' }"
           :style="panelStyle"
           role="listbox"
         >
-          <li v-for="group in groups" :key="group.id">
+          <li v-for="option in options" :key="option.value">
             <button
-              class="group-option"
+              class="filter-option"
               type="button"
               role="option"
-              :aria-selected="group.id === modelValue"
-              :class="{ active: group.id === modelValue }"
-              @click="selectGroup(group.id)"
+              :aria-selected="option.value === modelValue"
+              :class="{ active: option.value === modelValue }"
+              @click="selectOption(option.value)"
             >
-              <span class="group-option-main">
-                <span class="group-option-name">{{ group.name }}</span>
-                <span class="group-option-target">{{ group.targetBaseUrl }}</span>
+              <span class="filter-option-main">
+                <span class="filter-option-label">{{ option.label }}</span>
+                <span class="filter-option-hint">{{ option.hint ?? label }}</span>
               </span>
-              <span v-if="group.id === modelValue" class="group-option-check" aria-hidden="true">✓</span>
+              <span v-if="option.value === modelValue" class="filter-option-check" aria-hidden="true">✓</span>
             </button>
           </li>
         </ul>
@@ -215,24 +188,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.group-picker {
+.filter-picker {
   position: relative;
   width: 100%;
   z-index: 1;
 }
 
-.group-picker.open {
+.filter-picker.open {
   z-index: 48;
 }
 
-.group-trigger {
+.filter-trigger {
   width: 100%;
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
   color: var(--text);
-  padding: 8px 76px 8px 11px;
+  padding: 8px 36px 8px 11px;
   display: flex;
   justify-content: flex-start;
   align-items: center;
@@ -242,33 +215,29 @@ onBeforeUnmount(() => {
   transition: border-color 140ms ease, background-color 140ms ease;
 }
 
-.group-trigger-wrap {
-  position: relative;
-}
-
-.group-trigger:hover {
+.filter-trigger:hover {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-soft));
 }
 
-.group-trigger.disabled {
+.filter-trigger.disabled {
   cursor: default;
   opacity: 0.68;
 }
 
-.group-trigger:focus-visible {
+.filter-trigger:focus-visible {
   outline: 3px solid var(--accent-soft);
   outline-offset: 1px;
 }
 
-.group-trigger-main {
+.filter-trigger-main {
   min-width: 0;
   display: grid;
   gap: 2px;
   width: 100%;
 }
 
-.group-prefix {
+.filter-prefix {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -277,13 +246,13 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
-.group-name {
+.filter-value {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-.group-target {
+.filter-hint {
   min-width: 0;
   font-size: 10px;
   line-height: 1.2;
@@ -294,7 +263,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
 }
 
-.group-arrow {
+.filter-arrow {
   width: 16px;
   height: 16px;
   color: var(--text-soft);
@@ -309,52 +278,17 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.group-arrow svg {
+.filter-arrow svg {
   width: 100%;
   height: 100%;
   fill: currentColor;
 }
 
-.group-arrow.open {
+.filter-arrow.open {
   transform: translateY(-50%) rotate(180deg);
 }
 
-.group-delete {
-  position: absolute;
-  top: 50%;
-  right: 34px;
-  transform: translateY(-50%);
-  width: 25px;
-  height: 25px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-soft);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
-}
-
-.group-delete:hover {
-  border-color: color-mix(in srgb, var(--error) 52%, var(--line));
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 10%, var(--surface));
-}
-
-.group-delete:focus-visible {
-  outline: 3px solid var(--accent-soft);
-  outline-offset: 1px;
-}
-
-.group-delete svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-
-.group-panel {
+.filter-panel {
   margin: 0;
   padding: 6px;
   list-style: none;
@@ -365,16 +299,16 @@ onBeforeUnmount(() => {
   overflow: auto;
 }
 
-.group-panel-layer {
+.filter-panel-layer {
   position: fixed;
   z-index: 4200;
 }
 
-.group-panel-layer.is-above {
+.filter-panel-layer.is-above {
   transform: translateY(-100%);
 }
 
-.group-option {
+.filter-option {
   width: 100%;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -389,37 +323,36 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.group-option-main {
+.filter-option-main {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.group-option:hover {
+.filter-option:hover {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
 
-.group-option.active {
+.filter-option.active {
   border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
-.group-option-name {
+.filter-option-label {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-.group-option-target {
+.filter-option-hint {
   font-size: 10px;
   color: var(--text-soft);
   line-height: 1.25;
-  word-break: break-all;
   font-family: var(--font-mono);
 }
 
-.group-option-check {
+.filter-option-check {
   font-size: 12px;
   line-height: 1.2;
   font-weight: 800;

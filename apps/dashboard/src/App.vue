@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import JsonPretty from "vue-json-pretty";
 import GroupPicker from "./components/GroupPicker.vue";
+import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import GroupFormModal from "./components/GroupFormModal.vue";
 import ToastMessages from "./components/ToastMessages.vue";
@@ -36,6 +37,7 @@ const modalTargetBaseUrl = ref("");
 const deleteGroupModalOpen = ref(false);
 const deleteGroupSubmitting = ref(false);
 const pendingDeleteGroup = ref<ProxyGroup | null>(null);
+const resetModalOpen = ref(false);
 const toastMessages = ref<Array<{ id: number; text: string; level: "success" | "error" | "info" }>>([]);
 
 let events: EventSource | null = null;
@@ -49,17 +51,104 @@ type BodyView = {
   note: string;
 };
 
-const hasRecords = computed(() => records.value.length > 0);
+const BODY_COLLAPSE_THRESHOLD = 4_096;
+const METHOD_FILTER_OPTIONS = [
+  { value: "ALL", label: "全部请求", hint: "不过滤 Method" },
+  { value: "GET", label: "GET", hint: "读取类请求" },
+  { value: "POST", label: "POST", hint: "创建类请求" },
+  { value: "PUT", label: "PUT", hint: "覆盖更新" },
+  { value: "PATCH", label: "PATCH", hint: "局部更新" },
+  { value: "DELETE", label: "DELETE", hint: "删除类请求" },
+  { value: "OPTIONS", label: "OPTIONS", hint: "预检与能力探测" },
+  { value: "HEAD", label: "HEAD", hint: "只看响应头" },
+] as const;
+const STATUS_FILTER_OPTIONS = [
+  { value: "ALL", label: "全部状态", hint: "不过滤 Status" },
+  { value: "2xx", label: "2xx 成功", hint: "请求成功" },
+  { value: "3xx", label: "3xx 重定向", hint: "发生跳转" },
+  { value: "4xx", label: "4xx 客户端错误", hint: "请求参数问题" },
+  { value: "5xx", label: "5xx 服务端错误", hint: "上游异常" },
+  { value: "ERROR", label: "ERR 异常", hint: "代理或网络失败" },
+] as const;
+const SORT_OPTIONS = [
+  { value: "latest", label: "最新优先", hint: "按请求时间倒序" },
+  { value: "duration_desc", label: "耗时从高到低", hint: "优先查看慢请求" },
+  { value: "duration_asc", label: "耗时从低到高", hint: "优先查看快请求" },
+] as const;
+
+type MethodFilter = (typeof METHOD_FILTER_OPTIONS)[number]["value"];
+type StatusFilter = (typeof STATUS_FILTER_OPTIONS)[number]["value"];
+type SortMode = (typeof SORT_OPTIONS)[number]["value"];
+type StatusTone = "success" | "redirect" | "client" | "server" | "error" | "pending";
+
+const methodFilter = ref<MethodFilter>("ALL");
+const statusFilter = ref<StatusFilter>("ALL");
+const sortMode = ref<SortMode>("latest");
+const requestBodyExpanded = ref(false);
+const responseBodyExpanded = ref(false);
+
+const filteredRecords = computed(() => {
+  let items = records.value.filter((record) => {
+    if (methodFilter.value !== "ALL" && record.method !== methodFilter.value) {
+      return false;
+    }
+
+    const status = record.responseStatus;
+    if (statusFilter.value === "ALL") {
+      return true;
+    }
+    if (statusFilter.value === "ERROR") {
+      return record.error !== null;
+    }
+    if (status === null) {
+      return false;
+    }
+    if (statusFilter.value === "2xx") {
+      return status >= 200 && status < 300;
+    }
+    if (statusFilter.value === "3xx") {
+      return status >= 300 && status < 400;
+    }
+    if (statusFilter.value === "4xx") {
+      return status >= 400 && status < 500;
+    }
+    return status >= 500 && status < 600;
+  });
+
+  items = [...items];
+  if (sortMode.value === "duration_desc") {
+    items.sort((left, right) => right.durationMs - left.durationMs);
+  } else if (sortMode.value === "duration_asc") {
+    items.sort((left, right) => left.durationMs - right.durationMs);
+  } else {
+    items.sort(
+      (left, right) =>
+        new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
+    );
+  }
+  return items;
+});
+
+const hasRecords = computed(() => filteredRecords.value.length > 0);
+const emptyRecordsLabel = computed(() => {
+  if (records.value.length === 0) {
+    return "还没有请求记录。";
+  }
+  return "当前筛选条件下没有匹配记录。";
+});
 const selectedRecord = computed(() => {
   if (!hasRecords.value) {
     return null;
   }
 
   if (!selectedRecordId.value) {
-    return records.value[0];
+    return filteredRecords.value[0];
   }
 
-  return records.value.find((record) => record.id === selectedRecordId.value) ?? records.value[0];
+  return (
+    filteredRecords.value.find((record) => record.id === selectedRecordId.value) ??
+    filteredRecords.value[0]
+  );
 });
 
 const activeGroup = computed(() => {
@@ -70,8 +159,6 @@ const activeGroup = computed(() => {
 });
 
 const currentGroupId = computed(() => activeGroup.value?.id ?? "");
-const recordsCountLabel = computed(() => `${records.value.length} 条`);
-const groupsCountLabel = computed(() => `${groups.value.length} 组`);
 const connectionLabel = computed(() => {
   if (connectionState.value === "open") return "SSE 已连接";
   if (connectionState.value === "connecting") return "SSE 连接中";
@@ -84,12 +171,25 @@ const modalDesc = computed(() =>
     : "修改当前分组的名称与转发地址，地址仍需保持唯一。",
 );
 const modalSubmitText = computed(() => (groupModalMode.value === "create" ? "创建并切换" : "保存分组"));
+const resetConfirmTips = [
+  "会删除所有分组配置，仅保留一个默认分组。",
+  "会清空全部历史请求记录。",
+  "操作不可撤销，请确认当前数据已无需保留。",
+];
 
 const detailStatusLabel = computed(() => {
   if (!selectedRecord.value) {
     return "-";
   }
   return selectedRecord.value.responseStatus ?? "ERR";
+});
+
+const detailStatusTone = computed<StatusTone>(() => {
+  const record = selectedRecord.value;
+  if (!record) {
+    return "pending";
+  }
+  return resolveStatusTone(record.responseStatus, record.error);
 });
 
 const normalizeTargetInput = (value: string): string | null => {
@@ -166,12 +266,38 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
 const requestBodyView = computed(() => parseBody(selectedRecord.value?.requestBody ?? null));
 const responseBodyView = computed(() => parseBody(selectedRecord.value?.responseBody ?? null));
 
+const requestBodyCollapsible = computed(() => {
+  const body = selectedRecord.value?.requestBody ?? null;
+  if (!body || body.size <= BODY_COLLAPSE_THRESHOLD) {
+    return false;
+  }
+  return requestBodyView.value.mode === "json" || requestBodyView.value.mode === "text";
+});
+
+const responseBodyCollapsible = computed(() => {
+  const body = selectedRecord.value?.responseBody ?? null;
+  if (!body || body.size <= BODY_COLLAPSE_THRESHOLD) {
+    return false;
+  }
+  return responseBodyView.value.mode === "json" || responseBodyView.value.mode === "text";
+});
+
+const requestBodyCollapsed = computed(() => requestBodyCollapsible.value && !requestBodyExpanded.value);
+const responseBodyCollapsed = computed(
+  () => responseBodyCollapsible.value && !responseBodyExpanded.value,
+);
+
 const formatTime = (iso: string): string => {
   const date = new Date(iso);
   return date.toLocaleTimeString();
 };
 
 const formatDuration = (durationMs: number): string => `${durationMs} ms`;
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
+  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
+};
 
 const toPrettyJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -212,6 +338,89 @@ const buildCurlCommand = (record: ProxyTrafficRecord): string => {
   }
   commandParts.push(shellEscape(record.upstreamUrl));
   return commandParts.join(" ");
+};
+
+const normalizeExportPayload = (
+  raw: unknown,
+  fallback: { groupId: string; groupName: string },
+): ProxyRecordsExportResponse => {
+  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const exportedAtRaw = typeof source.exportedAt === "string" ? source.exportedAt.trim() : "";
+  const exportedAt =
+    exportedAtRaw.length > 0 && !Number.isNaN(Date.parse(exportedAtRaw))
+      ? exportedAtRaw
+      : new Date().toISOString();
+  const groupId =
+    typeof source.groupId === "string" && source.groupId.trim().length > 0
+      ? source.groupId.trim()
+      : fallback.groupId;
+  const groupName =
+    typeof source.groupName === "string" && source.groupName.trim().length > 0
+      ? source.groupName.trim()
+      : fallback.groupName;
+  const items = Array.isArray(source.items) ? (source.items as ProxyTrafficRecord[]) : [];
+  const totalRaw = typeof source.total === "number" ? source.total : Number.NaN;
+  const total = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : items.length;
+
+  return {
+    exportedAt,
+    groupId,
+    groupName,
+    total,
+    items,
+  };
+};
+
+const resolveStatusTone = (status: number | null, error: string | null): StatusTone => {
+  if (error || status === null) {
+    return "error";
+  }
+  if (status >= 200 && status < 300) {
+    return "success";
+  }
+  if (status >= 300 && status < 400) {
+    return "redirect";
+  }
+  if (status >= 400 && status < 500) {
+    return "client";
+  }
+  if (status >= 500) {
+    return "server";
+  }
+  return "pending";
+};
+
+const resetFilters = (): void => {
+  methodFilter.value = "ALL";
+  statusFilter.value = "ALL";
+  sortMode.value = "latest";
+};
+
+const isMethodFilter = (value: string): value is MethodFilter =>
+  METHOD_FILTER_OPTIONS.some((option) => option.value === value);
+
+const isStatusFilter = (value: string): value is StatusFilter =>
+  STATUS_FILTER_OPTIONS.some((option) => option.value === value);
+
+const isSortMode = (value: string): value is SortMode =>
+  SORT_OPTIONS.some((option) => option.value === value);
+
+const updateMethodFilter = (value: string): void => {
+  if (isMethodFilter(value)) {
+    methodFilter.value = value;
+  }
+};
+
+const updateStatusFilter = (value: string): void => {
+  if (isStatusFilter(value)) {
+    statusFilter.value = value;
+  }
+};
+
+const updateSortMode = (value: string): void => {
+  if (isSortMode(value)) {
+    sortMode.value = value;
+  }
 };
 
 const withGroupQuery = (path: string): string => {
@@ -288,12 +497,9 @@ const removeRecordLocal = (recordId: string): void => {
   }
 
   records.value.splice(currentIndex, 1);
-  if (selectedRecordId.value !== recordId) {
-    return;
+  if (selectedRecordId.value === recordId) {
+    selectedRecordId.value = null;
   }
-
-  const fallback = records.value[currentIndex] ?? records.value[currentIndex - 1] ?? records.value[0] ?? null;
-  selectedRecordId.value = fallback?.id ?? null;
 };
 
 const applySseEvent = (event: ProxySseEvent): void => {
@@ -351,7 +557,7 @@ const fetchRecords = async (): Promise<void> => {
     return;
   }
 
-  const response = await fetch(withGroupQuery("/_proxira/api/records"));
+  const response = await fetch(withGroupQuery("/_proxira/api/records?limit=500"));
   if (!response.ok) {
     throw new Error("加载历史记录失败");
   }
@@ -639,12 +845,39 @@ const exportRecords = async (): Promise<void> => {
   exporting.value = true;
 
   try {
-    const response = await fetch(withGroupQuery("/_proxira/api/records/export"));
+    const query = new URLSearchParams();
+    if (methodFilter.value !== "ALL") {
+      query.set("method", methodFilter.value);
+    }
+    if (statusFilter.value === "ERROR") {
+      query.set("status", "error");
+    } else if (statusFilter.value !== "ALL") {
+      query.set("status", statusFilter.value);
+    }
+    const queryText = query.toString();
+    const path = queryText
+      ? `/_proxira/api/records/export?${queryText}`
+      : "/_proxira/api/records/export";
+    const response = await fetch(withGroupQuery(path));
     if (!response.ok) {
       throw new Error("导出失败");
     }
 
-    const payload = (await response.json()) as ProxyRecordsExportResponse;
+    const fallbackGroupName = activeGroup.value?.name?.trim() || "group";
+    const responseText = await response.text();
+    let rawPayload: unknown = {};
+    if (responseText.trim().length > 0) {
+      try {
+        rawPayload = JSON.parse(responseText) as unknown;
+      } catch {
+        rawPayload = {};
+      }
+    }
+    const payload = normalizeExportPayload(rawPayload, {
+      groupId: currentGroupId.value,
+      groupName: fallbackGroupName,
+    });
+
     const jsonText = toPrettyJson(payload);
     const blob = new Blob([jsonText], { type: "application/json; charset=utf-8" });
     const objectUrl = URL.createObjectURL(blob);
@@ -659,7 +892,11 @@ const exportRecords = async (): Promise<void> => {
     link.click();
     link.remove();
     URL.revokeObjectURL(objectUrl);
-    pushToast(`导出成功，共 ${payload.total} 条`, "success");
+    if (payload.total === 0) {
+      pushToast("导出成功，当前筛选条件下无记录（空文件）", "info");
+    } else {
+      pushToast(`导出成功，共 ${payload.total} 条`, "success");
+    }
   } catch (error) {
     pushToast(error instanceof Error ? error.message : "导出失败", "error");
   } finally {
@@ -693,11 +930,18 @@ const clearRecords = async (): Promise<void> => {
   }
 };
 
-const resetAllContent = async (): Promise<void> => {
-  if (!window.confirm("确认重置所有分组和历史记录吗？该操作不可恢复。")) {
+const openResetModal = (): void => {
+  resetModalOpen.value = true;
+};
+
+const closeResetModal = (): void => {
+  if (resettingAll.value) {
     return;
   }
+  resetModalOpen.value = false;
+};
 
+const confirmResetAll = async (): Promise<void> => {
   resettingAll.value = true;
   try {
     const response = await fetch(`${apiBase}/_proxira/api/reset`, {
@@ -714,6 +958,7 @@ const resetAllContent = async (): Promise<void> => {
     syncConfig(payload.config);
     await fetchRecords();
     pushToast(`已重置全部内容，清除 ${payload.clearedRecords} 条历史`, "success");
+    closeResetModal();
   } catch (error) {
     pushToast(error instanceof Error ? error.message : "重置失败", "error");
   } finally {
@@ -732,6 +977,14 @@ onMounted(async () => {
   connectSse();
 });
 
+watch(
+  () => selectedRecord.value?.id ?? null,
+  () => {
+    requestBodyExpanded.value = false;
+    responseBodyExpanded.value = false;
+  },
+);
+
 onBeforeUnmount(() => {
   events?.close();
   for (const timer of toastTimers.values()) {
@@ -744,263 +997,330 @@ onBeforeUnmount(() => {
 <template>
   <main class="dashboard">
     <header class="topbar card">
-      <div>
-        <p class="kicker">Proxy Inspector</p>
-        <h1 class="title">Proxira 管理面板</h1>
+      <div class="topbar-brand">
+        <div class="title-row">
+          <h1 class="title">Proxira 管理面板</h1>
+          <p class="title-note">轻量级实时代理观测面板</p>
+        </div>
       </div>
       <div class="status-group">
-        <span class="counter">当前分组：{{ activeGroup?.name ?? "暂无分组" }}</span>
-        <span class="counter">{{ groupsCountLabel }}</span>
         <span class="badge" :data-state="connectionState">{{ connectionLabel }}</span>
-        <span class="counter">{{ recordsCountLabel }}</span>
+        <div class="status-actions">
+          <button class="button button-ghost topbar-action-button" type="button" @click="connectSse">重连</button>
+          <button class="button button-danger topbar-action-button" type="button" :disabled="resettingAll" @click="openResetModal">
+            {{ resettingAll ? "重置中..." : "重置全部" }}
+          </button>
+        </div>
       </div>
     </header>
 
-    <section class="action-zone card">
-      <div class="action-zone-head">
-        <h2 class="section-title">功能操作区</h2>
-        <p class="section-desc">分组管理与连接控制统一放在这里。</p>
-      </div>
-      <div class="action-zone-controls">
-        <GroupPicker
-          class="action-group-picker"
-          :groups="groups"
-          :model-value="currentGroupId"
-          @update:modelValue="onGroupSelect"
-          @request-delete="openDeleteGroupModal"
-        />
-        <button class="button button-ghost panel-button" type="button" @click="connectSse">重连</button>
-        <button class="button button-ghost panel-button" type="button" @click="openCreateGroupModal">
-          新增分组
-        </button>
-        <button class="button button-ghost panel-button" type="button" :disabled="!activeGroup" @click="openEditGroupModal">
-          编辑当前分组
-        </button>
-        <button class="button panel-button button-danger" type="button" :disabled="resettingAll" @click="resetAllContent">
-          {{ resettingAll ? "重置中..." : "重置全部" }}
-        </button>
-      </div>
-    </section>
-
     <section class="workspace">
-      <aside class="card list-panel">
-        <div class="panel-head">
-          <h2 class="section-title">历史请求</h2>
-          <div class="panel-actions">
-            <span class="panel-meta">最新优先</span>
-            <button class="button button-ghost panel-button panel-button-danger" :disabled="clearingRecords" @click="clearRecords">
-              {{ clearingRecords ? "清除中..." : "清除" }}
-            </button>
-            <button class="button button-ghost panel-button" :disabled="exporting" @click="exportRecords">
-              {{ exporting ? "导出中..." : "导出 JSON" }}
-            </button>
-          </div>
-        </div>
-
-        <p v-if="!hasRecords" class="empty">还没有请求记录。</p>
-
-        <ul v-else class="record-list">
-          <li v-for="record in records" :key="record.id">
-            <article
-              class="record-item"
-              :class="{ active: selectedRecord?.id === record.id }"
-              @click="onSelectRecord(record.id)"
-            >
-              <div class="record-line">
-                <span class="method">{{ record.method }}</span>
-                <div class="record-actions">
-                  <span class="status" :data-error="Boolean(record.error)">
-                    {{ record.responseStatus ?? "ERR" }}
-                  </span>
-                  <button
-                    class="record-delete"
-                    type="button"
-                    :disabled="deletingRecordId === record.id"
-                    @click.stop="removeRecord(record.id)"
-                  >
-                    {{ deletingRecordId === record.id ? "删除中" : "删除" }}
-                  </button>
-                </div>
-              </div>
-              <code class="path">{{ record.path }}</code>
-              <div class="record-line meta">
-                <span>{{ formatDuration(record.durationMs) }}</span>
-                <span>{{ formatTime(record.timestamp) }}</span>
-              </div>
-            </article>
-          </li>
-        </ul>
-      </aside>
-
-      <section class="card detail-panel">
-        <header class="detail-toolbar">
-          <div class="detail-toolbar-info">
-            <p class="detail-toolbar-label">当前分组</p>
-            <p class="detail-toolbar-value">
-              {{ activeGroup?.name ?? "暂无分组" }}
-              <span class="detail-toolbar-target">{{ activeGroup?.targetBaseUrl ?? "-" }}</span>
-            </p>
-          </div>
-        </header>
-
-        <p v-if="!selectedRecord" class="empty">请选择一条请求记录查看详情。</p>
-
-        <template v-else>
-          <div class="detail-layout">
-            <header class="detail-head">
-              <div class="detail-head-row">
-                <h2 class="detail-title">{{ selectedRecord.method }} {{ selectedRecord.path }}</h2>
-                <div class="detail-head-actions">
-                  <button
-                    class="mini-button"
-                    type="button"
-                    @click="copyText('URL', selectedRecord.upstreamUrl)"
-                  >
-                    复制 URL
-                  </button>
-                  <button
-                    class="mini-button"
-                    type="button"
-                    @click="copyText('cURL', buildCurlCommand(selectedRecord))"
-                  >
-                    复制 cURL
-                  </button>
-                </div>
-              </div>
-              <div class="chips">
-                <span class="chip">状态: {{ detailStatusLabel }}</span>
-                <span class="chip">耗时: {{ formatDuration(selectedRecord.durationMs) }}</span>
-                <span class="chip">时间: {{ formatTime(selectedRecord.timestamp) }}</span>
-              </div>
-            </header>
-
-            <div class="detail-split">
-              <section class="detail-column">
-                <p class="detail-column-title">请求内容</p>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Query Params</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Query Params', toPrettyJson(selectedRecord.query))"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <JsonPretty class="json-view" :data="selectedRecord.query" />
-                </article>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Request Headers</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Request Headers', toPrettyJson(selectedRecord.requestHeaders))"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
-                </article>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Request Body</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Request Body', bodyViewToCopyText(requestBodyView))"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <JsonPretty
-                    v-if="requestBodyView.mode === 'json'"
-                    class="json-view"
-                    :data="requestBodyView.jsonData as any"
-                  />
-                  <pre v-else>{{ requestBodyView.mode === 'text' ? requestBodyView.text : requestBodyView.note }}</pre>
-                  <p v-if="requestBodyView.note && requestBodyView.mode !== 'empty'" class="sub-note">
-                    {{ requestBodyView.note }}
-                  </p>
-                </article>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Upstream</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Upstream URL', selectedRecord.upstreamUrl)"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <pre>{{ selectedRecord.upstreamUrl }}</pre>
-                </article>
-              </section>
-
-              <section class="detail-column">
-                <p class="detail-column-title">响应内容</p>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Response Headers</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Response Headers', toPrettyJson(selectedRecord.responseHeaders))"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
-                </article>
-
-                <article class="detail-card">
-                  <div class="detail-card-head">
-                    <h3>Response Body</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Response Body', bodyViewToCopyText(responseBodyView))"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <JsonPretty
-                    v-if="responseBodyView.mode === 'json'"
-                    class="json-view"
-                    :data="responseBodyView.jsonData as any"
-                  />
-                  <pre v-else>{{ responseBodyView.mode === 'text' ? responseBodyView.text : responseBodyView.note }}</pre>
-                  <p v-if="responseBodyView.note && responseBodyView.mode !== 'empty'" class="sub-note">
-                    {{ responseBodyView.note }}
-                  </p>
-                </article>
-
-                <article v-if="selectedRecord.error" class="detail-card detail-error">
-                  <div class="detail-card-head">
-                    <h3>Error</h3>
-                    <button
-                      class="mini-button"
-                      type="button"
-                      @click="copyText('Error', selectedRecord.error)"
-                    >
-                      复制
-                    </button>
-                  </div>
-                  <pre>{{ selectedRecord.error }}</pre>
-                </article>
-              </section>
+      <aside class="left-column">
+        <section class="card group-hub">
+          <div class="group-hub-row">
+            <GroupPicker
+              class="group-hub-picker"
+              :groups="groups"
+              :model-value="currentGroupId"
+              @update:modelValue="onGroupSelect"
+              @request-delete="openDeleteGroupModal"
+            />
+            <div class="group-hub-actions">
+              <button
+                class="round-icon-button"
+                type="button"
+                aria-label="新增分组"
+                data-tooltip="新增分组"
+                @click="openCreateGroupModal"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10.9 4a.9.9 0 1 0-1.8 0v5.1H4a.9.9 0 0 0 0 1.8h5.1V16a.9.9 0 0 0 1.8 0v-5.1H16a.9.9 0 1 0 0-1.8h-5.1V4Z" />
+                </svg>
+              </button>
+              <button
+                class="round-icon-button"
+                type="button"
+                :disabled="!activeGroup"
+                aria-label="编辑当前分组"
+                data-tooltip="编辑当前分组"
+                @click="openEditGroupModal"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M14.7 2.8a2.2 2.2 0 0 1 3.1 3.1L8.4 15.4l-3.6.5.5-3.6 9.4-9.5Zm1.8 1.3a.4.4 0 0 0-.6 0l-1 1 1.9 1.9 1-1a.4.4 0 0 0 0-.6l-1.3-1.3ZM13.6 6.4 6.9 13l-.2 1.2 1.2-.2 6.6-6.7-1.9-1.9Z" />
+                </svg>
+              </button>
             </div>
           </div>
-        </template>
+        </section>
+
+        <aside class="card list-panel">
+          <div class="panel-head">
+            <h2 class="section-title">历史请求</h2>
+            <div class="panel-actions">
+              <button class="button button-ghost panel-button panel-button-danger" :disabled="clearingRecords" @click="clearRecords">
+                {{ clearingRecords ? "清除中..." : "清除" }}
+              </button>
+              <button class="button button-ghost panel-button" :disabled="exporting" @click="exportRecords">
+                {{ exporting ? "导出中..." : "导出 JSON" }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="!hasRecords" class="empty">{{ emptyRecordsLabel }}</p>
+
+          <ul v-else class="record-list">
+            <li v-for="record in filteredRecords" :key="record.id">
+              <article
+                class="record-item"
+                :class="{ active: selectedRecord?.id === record.id }"
+                @click="onSelectRecord(record.id)"
+              >
+                <div class="record-line">
+                  <span class="method">{{ record.method }}</span>
+                  <div class="record-actions">
+                    <span class="status" :data-tone="resolveStatusTone(record.responseStatus, record.error)">
+                      {{ record.responseStatus ?? "ERR" }}
+                    </span>
+                    <button
+                      class="record-delete"
+                      type="button"
+                      :disabled="deletingRecordId === record.id"
+                      @click.stop="removeRecord(record.id)"
+                    >
+                      {{ deletingRecordId === record.id ? "删除中" : "删除" }}
+                    </button>
+                  </div>
+                </div>
+                <code class="path">{{ record.path }}</code>
+                <div class="record-line meta">
+                  <span class="duration">{{ formatDuration(record.durationMs) }}</span>
+                  <span>{{ formatTime(record.timestamp) }}</span>
+                </div>
+              </article>
+            </li>
+          </ul>
+        </aside>
+      </aside>
+
+      <section class="right-column">
+        <section class="action-zone card">
+          <div class="action-zone-head">
+            <h2 class="section-title">工作区</h2>
+          </div>
+          <div class="workspace-tools">
+            <div class="filter-grid">
+              <FilterPicker
+                class="filter-picker-item"
+                label="Method"
+                :options="METHOD_FILTER_OPTIONS"
+                :model-value="methodFilter"
+                @update:modelValue="updateMethodFilter"
+              />
+              <FilterPicker
+                class="filter-picker-item"
+                label="Status"
+                :options="STATUS_FILTER_OPTIONS"
+                :model-value="statusFilter"
+                @update:modelValue="updateStatusFilter"
+              />
+              <FilterPicker
+                class="filter-picker-item"
+                label="排序"
+                :options="SORT_OPTIONS"
+                :model-value="sortMode"
+                @update:modelValue="updateSortMode"
+              />
+            </div>
+            <button
+              class="filter-reset-button round-icon-button"
+              type="button"
+              aria-label="重置筛选"
+              data-tooltip="重置筛选"
+              @click="resetFilters"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 2a8 8 0 1 1-7.6 10.5.9.9 0 1 1 1.7-.5A6.2 6.2 0 1 0 5.7 5.2l1.5 1.5a.9.9 0 1 1-1.3 1.3L2.8 5a.9.9 0 0 1 0-1.3l3.1-3.1a.9.9 0 0 1 1.3 1.3L5.7 3.4A8 8 0 0 1 10 2Z"
+                />
+              </svg>
+            </button>
+          </div>
+        </section>
+
+        <section class="card detail-panel">
+          <p v-if="!selectedRecord" class="empty">请选择一条请求记录查看详情。</p>
+
+          <template v-else>
+            <div class="detail-layout">
+              <header class="detail-head">
+                <div class="detail-head-row">
+                  <h2 class="detail-title">{{ selectedRecord.method }} {{ selectedRecord.path }}</h2>
+                  <div class="detail-head-actions">
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('URL', selectedRecord.upstreamUrl)"
+                    >
+                      复制 URL
+                    </button>
+                    <button
+                      class="mini-button"
+                      type="button"
+                      @click="copyText('cURL', buildCurlCommand(selectedRecord))"
+                    >
+                      复制 cURL
+                    </button>
+                  </div>
+                </div>
+                <div class="chips">
+                  <span class="chip chip-status" :data-tone="detailStatusTone">状态: {{ detailStatusLabel }}</span>
+                  <span class="chip">耗时: {{ formatDuration(selectedRecord.durationMs) }}</span>
+                  <span class="chip">时间: {{ formatTime(selectedRecord.timestamp) }}</span>
+                </div>
+              </header>
+
+              <div class="detail-split">
+                <section class="detail-column">
+                  <p class="detail-column-title">请求内容</p>
+
+                  <article class="detail-card">
+                    <div class="detail-card-head">
+                      <h3>Query Params</h3>
+                      <button
+                        class="mini-button"
+                        type="button"
+                        @click="copyText('Query Params', toPrettyJson(selectedRecord.query))"
+                      >
+                        复制
+                      </button>
+                    </div>
+                    <JsonPretty class="json-view" :data="selectedRecord.query" />
+                  </article>
+
+                  <article class="detail-card">
+                    <div class="detail-card-head">
+                      <h3>Request Headers</h3>
+                      <button
+                        class="mini-button"
+                        type="button"
+                        @click="copyText('Request Headers', toPrettyJson(selectedRecord.requestHeaders))"
+                      >
+                        复制
+                      </button>
+                    </div>
+                    <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
+                  </article>
+
+                  <article class="detail-card">
+                    <div class="detail-card-head">
+                      <h3>Request Body</h3>
+                      <div class="detail-card-actions">
+                        <button
+                          class="mini-button"
+                          type="button"
+                          @click="copyText('Request Body', bodyViewToCopyText(requestBodyView))"
+                        >
+                          复制
+                        </button>
+                        <button
+                          v-if="requestBodyCollapsible"
+                          class="mini-button"
+                          type="button"
+                          @click="requestBodyExpanded = !requestBodyExpanded"
+                        >
+                          {{ requestBodyCollapsed ? "展开" : "折叠" }}
+                        </button>
+                      </div>
+                    </div>
+                    <JsonPretty
+                      v-if="requestBodyView.mode === 'json' && !requestBodyCollapsed"
+                      class="json-view"
+                      :data="requestBodyView.jsonData as any"
+                    />
+                    <pre v-else-if="requestBodyCollapsed">
+                      内容较大（{{ formatBytes(selectedRecord.requestBody.size) }}），已折叠，点击“展开”查看。
+                    </pre>
+                    <pre v-else>{{ requestBodyView.mode === 'text' ? requestBodyView.text : requestBodyView.note }}</pre>
+                    <p v-if="requestBodyView.note && requestBodyView.mode !== 'empty'" class="sub-note">
+                      {{ requestBodyView.note }}
+                    </p>
+                  </article>
+
+                </section>
+
+                <section class="detail-column">
+                  <p class="detail-column-title">响应内容</p>
+
+                  <article class="detail-card">
+                    <div class="detail-card-head">
+                      <h3>Response Headers</h3>
+                      <button
+                        class="mini-button"
+                        type="button"
+                        @click="copyText('Response Headers', toPrettyJson(selectedRecord.responseHeaders))"
+                      >
+                        复制
+                      </button>
+                    </div>
+                    <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
+                  </article>
+
+                  <article class="detail-card">
+                    <div class="detail-card-head">
+                      <h3>Response Body</h3>
+                      <div class="detail-card-actions">
+                        <button
+                          class="mini-button"
+                          type="button"
+                          @click="copyText('Response Body', bodyViewToCopyText(responseBodyView))"
+                        >
+                          复制
+                        </button>
+                        <button
+                          v-if="responseBodyCollapsible"
+                          class="mini-button"
+                          type="button"
+                          @click="responseBodyExpanded = !responseBodyExpanded"
+                        >
+                          {{ responseBodyCollapsed ? "展开" : "折叠" }}
+                        </button>
+                      </div>
+                    </div>
+                    <JsonPretty
+                      v-if="responseBodyView.mode === 'json' && !responseBodyCollapsed"
+                      class="json-view"
+                      :data="responseBodyView.jsonData as any"
+                    />
+                    <pre v-else-if="responseBodyCollapsed">
+                      内容较大（{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}），已折叠，点击“展开”查看。
+                    </pre>
+                    <pre v-else>{{ responseBodyView.mode === 'text' ? responseBodyView.text : responseBodyView.note }}</pre>
+                    <p v-if="responseBodyView.note && responseBodyView.mode !== 'empty'" class="sub-note">
+                      {{ responseBodyView.note }}
+                    </p>
+                  </article>
+
+                  <article v-if="selectedRecord.error" class="detail-card detail-error">
+                    <div class="detail-card-head">
+                      <h3>Error</h3>
+                      <button
+                        class="mini-button"
+                        type="button"
+                        @click="copyText('Error', selectedRecord.error)"
+                      >
+                        复制
+                      </button>
+                    </div>
+                    <pre>{{ selectedRecord.error }}</pre>
+                  </article>
+                </section>
+              </div>
+            </div>
+          </template>
+        </section>
       </section>
     </section>
+
     <ToastMessages :messages="toastMessages" @dismiss="dismissToast" />
     <GroupFormModal
       :open="groupModalOpen"
@@ -1022,6 +1342,17 @@ onBeforeUnmount(() => {
       :danger="true"
       @close="closeDeleteGroupModal"
       @confirm="confirmDeleteGroup"
+    />
+    <ConfirmDialog
+      :open="resetModalOpen"
+      title="确认重置全部内容"
+      message="重置后将立即恢复到初始状态。"
+      :tips="resetConfirmTips"
+      confirm-text="确认重置"
+      :loading="resettingAll"
+      :danger="true"
+      @close="closeResetModal"
+      @confirm="confirmResetAll"
     />
   </main>
 </template>

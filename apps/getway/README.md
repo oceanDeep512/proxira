@@ -89,6 +89,7 @@ proxira --no-banner
 ## 可选环境变量
 
 - `PROXY_HISTORY_LIMIT`：内存历史记录上限，默认 `1000`
+- `PROXY_HISTORY_PERSIST_LIMIT`：本地持久化时每个分组保留最近 N 条，默认 `200`（且不超过 `PROXY_HISTORY_LIMIT`）
 
 ## 注意事项
 

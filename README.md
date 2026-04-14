@@ -87,6 +87,7 @@ npx proxira --port 3010 --target http://localhost:8080
 - `PROXY_DATA_DIR`：配置文件存储目录（默认 `./.proxira`）
 - `PROXY_BODY_LIMIT`：记录体截断大小（默认 `32768` 字节）
 - `PROXY_HISTORY_LIMIT`：内存历史记录上限（默认 `1000`）
+- `PROXY_HISTORY_PERSIST_LIMIT`：本地持久化时每个分组保留最近 N 条（默认 `200`，且不超过 `PROXY_HISTORY_LIMIT`）
 - `PROXY_QUERY_LIMIT_MAX`：历史记录接口最大分页值（默认 `500`）
 - `PROXY_SSE_HEARTBEAT_MS`：SSE 心跳毫秒（默认 `15000`）
 - `PROXY_DISABLE_BANNER=1`：关闭启动 Banner

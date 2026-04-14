@@ -32,11 +32,24 @@ const SERVER_PORT = Number(process.env.PORT ?? 3000);
 const BODY_LIMIT = Number(process.env.PROXY_BODY_LIMIT ?? 32_768);
 const MAX_QUERY_LIMIT = Number(process.env.PROXY_QUERY_LIMIT_MAX ?? 500);
 const SSE_HEARTBEAT_MS = Number(process.env.PROXY_SSE_HEARTBEAT_MS ?? 15_000);
+const REQUEST_CONTENT_LENGTH_LIMIT_RAW = Number(process.env.PROXY_REQUEST_CONTENT_LENGTH_LIMIT ?? 10 * 1024 * 1024);
+const RESPONSE_BUFFER_LIMIT_RAW = Number(process.env.PROXY_RESPONSE_BUFFER_LIMIT ?? 10 * 1024 * 1024);
 const HISTORY_LIMIT_RAW = Number(process.env.PROXY_HISTORY_LIMIT ?? 1_000);
+const HISTORY_PERSIST_LIMIT_RAW = Number(process.env.PROXY_HISTORY_PERSIST_LIMIT ?? 200);
 const DISABLE_STARTUP_BANNER = process.env.PROXY_DISABLE_BANNER === "1";
 const HISTORY_LIMIT = Number.isFinite(HISTORY_LIMIT_RAW)
   ? Math.max(1, Math.floor(HISTORY_LIMIT_RAW))
   : 1_000;
+const HISTORY_PERSIST_LIMIT = Number.isFinite(HISTORY_PERSIST_LIMIT_RAW)
+  ? Math.max(1, Math.floor(HISTORY_PERSIST_LIMIT_RAW))
+  : 200;
+const EFFECTIVE_HISTORY_PERSIST_LIMIT = Math.min(HISTORY_LIMIT, HISTORY_PERSIST_LIMIT);
+const REQUEST_CONTENT_LENGTH_LIMIT = Number.isFinite(REQUEST_CONTENT_LENGTH_LIMIT_RAW)
+  ? Math.max(1, Math.floor(REQUEST_CONTENT_LENGTH_LIMIT_RAW))
+  : 10 * 1024 * 1024;
+const RESPONSE_BUFFER_LIMIT = Number.isFinite(RESPONSE_BUFFER_LIMIT_RAW)
+  ? Math.max(1, Math.floor(RESPONSE_BUFFER_LIMIT_RAW))
+  : 10 * 1024 * 1024;
 
 const DATA_DIR = resolve(process.env.PROXY_DATA_DIR?.trim() || join(process.cwd(), ".proxira"));
 const CONFIG_FILE = join(DATA_DIR, "config.json");
@@ -180,6 +193,21 @@ const normalizeGroupName = (nameRaw: string, fallbackIndex: number): string => {
     return normalized;
   }
   return `分组 ${fallbackIndex}`;
+};
+
+const toSafeAsciiToken = (raw: string): string => {
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+};
+
+const encodeFilenameRFC5987 = (raw: string): string => {
+  return encodeURIComponent(raw).replace(/['()*]/g, (char) => {
+    return `%${char.charCodeAt(0).toString(16).toUpperCase()}`;
+  });
 };
 
 const listGroupHistorySize = (): number => {
@@ -360,6 +388,22 @@ const buildUpstreamUrl = (targetBaseUrl: string, incomingUrl: URL): URL => {
   return upstreamUrl;
 };
 
+const buildDownstreamHeaders = (
+  upstreamHeaders: Headers,
+  method: string,
+  bodyLength?: number,
+): Headers => {
+  const downstreamHeaders = stripHeaders(upstreamHeaders, RESPONSE_HOP_BY_HOP_HEADERS);
+  if (downstreamHeaders.has("content-encoding")) {
+    downstreamHeaders.delete("content-encoding");
+    downstreamHeaders.delete("content-length");
+  }
+  if (method !== "HEAD" && Number.isFinite(bodyLength)) {
+    downstreamHeaders.set("content-length", String(bodyLength));
+  }
+  return downstreamHeaders;
+};
+
 const removeSseClient = (clientId: string): void => {
   const client = sseClients.get(clientId);
   if (!client) {
@@ -406,7 +450,7 @@ const saveConfig = (): void => {
 const serializeHistory = (): HistoryFilePayload => {
   const payload: HistoryFilePayload = {};
   for (const group of proxyConfig.groups) {
-    payload[group.id] = ensureGroupHistory(group.id);
+    payload[group.id] = ensureGroupHistory(group.id).slice(0, EFFECTIVE_HISTORY_PERSIST_LIMIT);
   }
   return payload;
 };
@@ -529,8 +573,25 @@ const filterRecords = (
     filtered = filtered.filter((item) => item.path.includes(pathRaw));
   }
   if (statusRaw) {
-    if (statusRaw === "error") {
+    const normalizedStatus = statusRaw.toLowerCase();
+    if (normalizedStatus === "error") {
       filtered = filtered.filter((item) => item.error !== null);
+    } else if (normalizedStatus === "2xx") {
+      filtered = filtered.filter(
+        (item) => item.responseStatus !== null && item.responseStatus >= 200 && item.responseStatus < 300,
+      );
+    } else if (normalizedStatus === "3xx") {
+      filtered = filtered.filter(
+        (item) => item.responseStatus !== null && item.responseStatus >= 300 && item.responseStatus < 400,
+      );
+    } else if (normalizedStatus === "4xx") {
+      filtered = filtered.filter(
+        (item) => item.responseStatus !== null && item.responseStatus >= 400 && item.responseStatus < 500,
+      );
+    } else if (normalizedStatus === "5xx") {
+      filtered = filtered.filter(
+        (item) => item.responseStatus !== null && item.responseStatus >= 500 && item.responseStatus < 600,
+      );
     } else {
       const statusCode = Number(statusRaw);
       if (Number.isFinite(statusCode)) {
@@ -549,21 +610,36 @@ const hydrateState = async (): Promise<void> => {
   const normalizedDefaultTarget =
     normalizeTargetBaseUrl(DEFAULT_TARGET_BASE_URL) ?? "http://localhost:8080";
   const hydratedGroups: ProxyGroup[] = [];
+  const usedGroupIds = new Set<string>();
+  const usedTargets = new Set<string>();
 
   if (Array.isArray(fileConfig?.groups)) {
     for (const group of fileConfig.groups) {
       if (!group || typeof group.id !== "string" || typeof group.targetBaseUrl !== "string") {
         continue;
       }
+
+      const groupId = group.id.trim();
+      if (!groupId || usedGroupIds.has(groupId)) {
+        continue;
+      }
+
       const normalizedTarget = normalizeTargetBaseUrl(group.targetBaseUrl);
       if (!normalizedTarget) {
         continue;
       }
+      if (usedTargets.has(normalizedTarget)) {
+        continue;
+      }
+
+      const normalizedName = normalizeGroupName(group.name ?? "", hydratedGroups.length + 1);
       hydratedGroups.push({
-        id: group.id,
-        name: normalizeGroupName(group.name ?? "", hydratedGroups.length + 1),
+        id: groupId,
+        name: normalizedName,
         targetBaseUrl: normalizedTarget,
       });
+      usedGroupIds.add(groupId);
+      usedTargets.add(normalizedTarget);
     }
   }
 
@@ -627,6 +703,7 @@ const printStartupInfo = (port: number): void => {
     console.log(`当前上游地址：${proxyConfig.targetBaseUrl}`);
     console.log(`数据目录：${DATA_DIR}`);
     console.log(`历史记录上限：${HISTORY_LIMIT}`);
+    console.log(`本地持久化最近条数：${EFFECTIVE_HISTORY_PERSIST_LIMIT}`);
     if (dashboardDistDir) {
       console.log(`管理面板：${dashboardUrl}`);
     } else {
@@ -653,6 +730,7 @@ const printStartupInfo = (port: number): void => {
     }`,
     `${chalk.bold("Target")}: ${chalk.green(proxyConfig.targetBaseUrl)}`,
     `${chalk.bold("History Limit")}: ${chalk.gray(String(HISTORY_LIMIT))}`,
+    `${chalk.bold("Persist Recent")}: ${chalk.gray(String(EFFECTIVE_HISTORY_PERSIST_LIMIT))}`,
     `${chalk.bold("Data Dir")}: ${chalk.gray(DATA_DIR)}`,
   ].join("\n");
 
@@ -933,25 +1011,28 @@ app.get("/_proxira/api/records/export", (c) => {
     return c.json({ message: "groupId not found." }, 404);
   }
   const filtered = filterRecords(ensureGroupHistory(group.id), methodRaw, pathRaw, statusRaw);
+  const safeGroupName = normalizeGroupName(group.name, 1);
 
   const payload: ProxyRecordsExportResponse = {
     exportedAt: new Date().toISOString(),
     groupId: group.id,
-    groupName: group.name,
+    groupName: safeGroupName,
     total: filtered.length,
     items: filtered,
   };
   const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
   const groupToken =
-    group.name.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") ||
+    safeGroupName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") ||
     "group";
-  const fileName = `proxira-${groupToken}-records-${fileToken}.json`;
+  const asciiGroupToken = toSafeAsciiToken(safeGroupName) || "group";
+  const utf8FileName = `proxira-${groupToken}-records-${fileToken}.json`;
+  const asciiFileName = `proxira-${asciiGroupToken}-records-${fileToken}.json`;
 
   return new Response(JSON.stringify(payload, null, 2), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
-      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Disposition": `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeFilenameRFC5987(utf8FileName)}`,
     },
   });
 });
@@ -1077,6 +1158,21 @@ app.all("*", async (c) => {
   if (!activeGroup) {
     return c.json({ message: "No active group configured." }, 500);
   }
+
+  const requestContentLengthRaw = c.req.header("content-length")?.trim();
+  const requestContentLength = requestContentLengthRaw ? Number(requestContentLengthRaw) : Number.NaN;
+  if (
+    Number.isFinite(requestContentLength) &&
+    requestContentLength > REQUEST_CONTENT_LENGTH_LIMIT
+  ) {
+    return c.json(
+      {
+        message: `Request body is too large. Limit is ${REQUEST_CONTENT_LENGTH_LIMIT} bytes.`,
+      },
+      413,
+    );
+  }
+
   const upstreamUrl = buildUpstreamUrl(activeGroup.targetBaseUrl, incomingUrl);
   const method = c.req.method.toUpperCase();
 
@@ -1104,6 +1200,44 @@ app.all("*", async (c) => {
 
   try {
     const upstreamResponse = await fetch(upstreamUrl, upstreamRequest);
+    const responseContentLengthRaw = upstreamResponse.headers.get("content-length");
+    const responseContentLength = responseContentLengthRaw ? Number(responseContentLengthRaw) : Number.NaN;
+
+    if (
+      Number.isFinite(responseContentLength) &&
+      responseContentLength > RESPONSE_BUFFER_LIMIT
+    ) {
+      const responseHeaders = collectHeaders(upstreamResponse.headers);
+      const record: ProxyTrafficRecord = {
+        id: crypto.randomUUID(),
+        groupId: activeGroup.id,
+        timestamp: new Date().toISOString(),
+        method,
+        path: incomingUrl.pathname,
+        query,
+        requestHeaders,
+        requestBody,
+        upstreamUrl: upstreamUrl.toString(),
+        responseStatus: upstreamResponse.status,
+        responseHeaders,
+        responseBody: {
+          text: null,
+          size: responseContentLength,
+          truncated: true,
+          isBinary: true,
+        },
+        durationMs: Date.now() - startedAtMs,
+        error: null,
+      };
+
+      addHistoryRecord(activeGroup.id, record);
+
+      return new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        headers: buildDownstreamHeaders(upstreamResponse.headers, method),
+      });
+    }
+
     const responseBuffer = await upstreamResponse.arrayBuffer().catch(() => new ArrayBuffer(0));
     const responseBytes = new Uint8Array(responseBuffer);
 
@@ -1132,21 +1266,9 @@ app.all("*", async (c) => {
 
     addHistoryRecord(activeGroup.id, record);
 
-    const downstreamHeaders = stripHeaders(
-      upstreamResponse.headers,
-      RESPONSE_HOP_BY_HOP_HEADERS,
-    );
-    if (downstreamHeaders.has("content-encoding")) {
-      downstreamHeaders.delete("content-encoding");
-      downstreamHeaders.delete("content-length");
-    }
-    if (method !== "HEAD") {
-      downstreamHeaders.set("content-length", String(responseBytes.byteLength));
-    }
-
     return new Response(responseBytes, {
       status: upstreamResponse.status,
-      headers: downstreamHeaders,
+      headers: buildDownstreamHeaders(upstreamResponse.headers, method, responseBytes.byteLength),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown proxy error";

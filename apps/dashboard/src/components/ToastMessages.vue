@@ -30,9 +30,9 @@ const emit = defineEmits<{
 <style scoped>
 .toast-host {
   position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 1000;
+  top: 12px;
+  right: 12px;
+  z-index: 1400;
   width: min(360px, calc(100vw - 20px));
   margin: 0;
   padding: 0;
@@ -49,21 +49,21 @@ const emit = defineEmits<{
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid #c6d4e6;
-  background: #f8fbff;
-  color: #1f2a37;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-flat), var(--shadow-soft);
 }
 
 .toast-item[data-level="success"] {
-  border-color: #86efac;
-  background: #f0fdf4;
+  border-color: color-mix(in srgb, var(--success) 52%, var(--line));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
 }
 
 .toast-item[data-level="error"] {
-  border-color: #fda4af;
-  background: #fff1f2;
+  border-color: color-mix(in srgb, var(--error) 52%, var(--line));
+  background: color-mix(in srgb, var(--error) 8%, var(--surface));
 }
 
 .toast-text {
@@ -76,18 +76,19 @@ const emit = defineEmits<{
 .toast-close {
   min-height: 24px;
   border-radius: 999px;
-  border: 1px solid #c6d4e6;
-  background: #ffffff;
-  color: #4b5f73;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text-soft);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 0 9px;
   cursor: pointer;
+  transition: border-color 130ms ease, color 130ms ease;
 }
 
 .toast-close:hover {
-  border-color: #3b82f6;
-  color: #1d4ed8;
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  color: var(--accent-strong);
 }
 
 .toast-enter-active,
@@ -98,37 +99,7 @@ const emit = defineEmits<{
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
-}
-
-@media (prefers-color-scheme: dark) {
-  .toast-item {
-    border-color: #2a3442;
-    background: #161d27;
-    color: #e7edf4;
-    box-shadow: 0 14px 36px rgba(2, 6, 23, 0.55);
-  }
-
-  .toast-item[data-level="success"] {
-    border-color: #166534;
-    background: #052e1b;
-  }
-
-  .toast-item[data-level="error"] {
-    border-color: #7f1d1d;
-    background: #3f0d17;
-  }
-
-  .toast-close {
-    border-color: #334155;
-    background: #0f172a;
-    color: #a7b8cb;
-  }
-
-  .toast-close:hover {
-    border-color: #60a5fa;
-    color: #93c5fd;
-  }
+  transform: translateY(-6px);
 }
 
 @media (max-width: 840px) {

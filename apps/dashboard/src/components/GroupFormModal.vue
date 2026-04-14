@@ -127,7 +127,8 @@ const onSubmit = (): void => {
   position: fixed;
   inset: 0;
   z-index: 1200;
-  background: rgba(15, 23, 42, 0.42);
+  background: color-mix(in srgb, var(--text) 24%, transparent);
+  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -137,8 +138,8 @@ const onSubmit = (): void => {
   width: min(520px, 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: var(--surface);
+  box-shadow: var(--shadow-flat), var(--shadow-soft);
   padding: 14px;
   display: grid;
   gap: 10px;
@@ -153,24 +154,26 @@ const onSubmit = (): void => {
 
 .modal-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .modal-close {
   min-height: 30px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--panel-soft);
+  background: var(--surface-soft);
   color: var(--text-soft);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 0 10px;
   cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
 }
 
 .modal-close:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  color: var(--accent-strong);
 }
 
 .modal-desc {
@@ -185,25 +188,29 @@ const onSubmit = (): void => {
 }
 
 .modal-label {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-soft);
 }
 
 .modal-input {
-  min-height: 38px;
+  min-height: 40px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--panel-soft);
+  background: var(--surface-soft);
   color: var(--text);
   font-size: 13px;
   padding: 0 12px;
   outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
 .modal-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-soft));
 }
 
 .modal-actions {
@@ -220,19 +227,26 @@ const onSubmit = (): void => {
   background: var(--accent);
   color: #f8fbff;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 0 14px;
   cursor: pointer;
+  transition: transform 130ms ease, filter 130ms ease;
+}
+
+.modal-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
 }
 
 .modal-button:disabled {
   opacity: 0.72;
   cursor: default;
+  transform: none;
 }
 
 .modal-button-ghost {
   border-color: var(--line);
-  background: var(--panel-soft);
+  background: var(--surface-soft);
   color: var(--text);
 }
 
