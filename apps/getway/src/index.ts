@@ -534,10 +534,17 @@ const hydrateGroupHistory = (
   }
 
   const nextItems: ProxyTrafficRecord[] = [];
+  const usedRecordIds = new Set<string>();
   for (const rawItem of rawItems) {
     const normalized = normalizeRecord(rawItem, group.id);
     if (normalized) {
-      nextItems.push(normalized);
+      // Keep record ids unique in memory so UI keyed by id never collapses entries.
+      let uniqueId = normalized.id;
+      while (usedRecordIds.has(uniqueId)) {
+        uniqueId = crypto.randomUUID();
+      }
+      usedRecordIds.add(uniqueId);
+      nextItems.push(uniqueId === normalized.id ? normalized : { ...normalized, id: uniqueId });
     }
     if (nextItems.length >= HISTORY_LIMIT) {
       break;
@@ -546,10 +553,27 @@ const hydrateGroupHistory = (
   return nextItems;
 };
 
+/**
+ * Ensure a traffic record id is unique inside one group history list.
+ */
+const ensureUniqueRecordId = (groupHistory: ProxyTrafficRecord[], preferredId: string): string => {
+  if (!groupHistory.some((item) => item.id === preferredId)) {
+    return preferredId;
+  }
+
+  let nextId = crypto.randomUUID();
+  while (groupHistory.some((item) => item.id === nextId)) {
+    nextId = crypto.randomUUID();
+  }
+  return nextId;
+};
+
 const addHistoryRecord = (groupId: string, record: ProxyTrafficRecord): void => {
   const groupHistory = ensureGroupHistory(groupId);
-  groupHistory.unshift(record);
-  broadcastEvent({ type: "record", groupId, record });
+  const nextRecordId = ensureUniqueRecordId(groupHistory, record.id);
+  const nextRecord = nextRecordId === record.id ? record : { ...record, id: nextRecordId };
+  groupHistory.unshift(nextRecord);
+  broadcastEvent({ type: "record", groupId, record: nextRecord });
   while (groupHistory.length > HISTORY_LIMIT) {
     const removed = groupHistory.pop();
     if (removed) {

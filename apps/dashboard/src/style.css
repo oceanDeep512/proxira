@@ -503,9 +503,10 @@ body::before {
 .record-list {
   margin: 0;
   list-style: none;
-  padding: 0 2px 0 0;
+  padding: 4px 4px 4px 0;
   display: grid;
   gap: 7px;
+  align-content: start;
   min-height: 0;
   overflow: auto;
 }
@@ -522,7 +523,8 @@ body::before {
 .record-item:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-  transform: translateY(-1px);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 14%, transparent);
+  transform: none;
 }
 
 .record-item.active {
