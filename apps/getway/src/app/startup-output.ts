@@ -20,19 +20,22 @@ export const printStartupInfo = (options: {
     historyLimit,
     effectiveHistoryPersistLimit,
   } = options;
-  const proxyUrl = `http://localhost:${port}`;
+  const protocol = config.httpsEnabled ? "https" : "http";
+  const proxyUrl = `${protocol}://localhost:${port}`;
   const proxyEntryUrl = config.proxyPrefixEnabled
     ? `${proxyUrl}${config.proxyPrefix}`
     : proxyUrl;
-  const dashboardUrl = dashboard.getDashboardUrl(port);
+  const dashboardUrl = `${protocol}://localhost:${port}${config.internalRoutePrefix}/ui`;
   const proxyModeLabel = config.proxyPrefixEnabled
     ? config.proxyPrefix
     : "disabled";
+  const httpsModeLabel = config.httpsEnabled ? "enabled" : "disabled";
 
   if (config.disableStartupBanner) {
     console.log(`代理服务已启动：${proxyUrl}`);
     console.log(`代理入口：${proxyEntryUrl}`);
     console.log(`代理前缀：${proxyModeLabel}`);
+    console.log(`HTTPS 模式：${httpsModeLabel}`);
     console.log(`当前上游地址：${targetBaseUrl}`);
     console.log(`数据目录：${config.dataDir}`);
     console.log(`历史记录上限：${historyLimit}`);
@@ -57,6 +60,9 @@ export const printStartupInfo = (options: {
     "",
     `${chalk.bold("Proxy")}: ${chalk.cyan(proxyEntryUrl)}`,
     `${chalk.bold("Prefix")}: ${chalk.gray(proxyModeLabel)}`,
+    `${chalk.bold("HTTPS")}: ${
+      config.httpsEnabled ? chalk.green(httpsModeLabel) : chalk.gray(httpsModeLabel)
+    }`,
     `${chalk.bold("Dashboard")}: ${
       dashboard.dashboardDistDir
         ? chalk.cyan(dashboardUrl)
@@ -103,12 +109,7 @@ const printStartupTips = (
   if (config.cliMode) {
     tips.push(
       "",
-      chalk.bold("CLI 示例"),
-      "  proxira --port 3010 --target http://localhost:8080",
-      "  proxira --prefix /debug-proxy --target http://localhost:8080",
-      "  proxira --no-prefix --target http://localhost:8080",
-      "  proxira -p 3001 -d ./.proxira",
-      "  proxira --help",
+      chalk.gray(`运行 ${chalk.cyan("proxira --help")} 查看完整命令说明`),
     );
   }
 

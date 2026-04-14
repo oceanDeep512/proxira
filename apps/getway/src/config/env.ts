@@ -114,5 +114,8 @@ export const loadRuntimeConfig = (
     proxyPrefix: proxyPrefix ?? "",
     dashboardDistDir: resolveDashboardDistDir(env, fs),
     cliMode: env.PROXY_CLI_MODE === "1",
+    httpsEnabled: env.PROXY_HTTPS_ENABLED === "1",
+    httpsKeyPath: env.PROXY_HTTPS_KEY_PATH?.trim() || null,
+    httpsCertPath: env.PROXY_HTTPS_CERT_PATH?.trim() || null,
   };
 };

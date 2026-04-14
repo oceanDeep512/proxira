@@ -27,7 +27,8 @@ export class DashboardAssets {
   }
 
   getDashboardUrl(port: number): string {
-    return `http://localhost:${port}${this.config.internalRoutePrefix}/ui`;
+    const protocol = this.config.httpsEnabled ? "https" : "http";
+    return `${protocol}://localhost:${port}${this.config.internalRoutePrefix}/ui`;
   }
 
   async serve(requestPath: string): Promise<Response> {

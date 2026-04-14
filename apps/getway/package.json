@@ -5,6 +5,7 @@
   "type": "module",
   "bin": "dist/cli.js",
   "author": "oceandeep512 <oceandeep512@mail.com>",
+  "license": "MIT",
   "files": [
     "dist",
     "dashboard-dist",

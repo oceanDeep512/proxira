@@ -31,6 +31,9 @@ export type RuntimeConfig = {
   proxyPrefix: string;
   dashboardDistDir: string | null;
   cliMode: boolean;
+  httpsEnabled: boolean;
+  httpsKeyPath: string | null;
+  httpsCertPath: string | null;
 };
 
 export type RuntimeDeps = {
