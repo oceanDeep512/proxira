@@ -1,7 +1,7 @@
 import { serve, getRequestListener } from "@hono/node-server";
 import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
-import type { Server } from "node:net";
+import { createServer as createNetServer, type Server } from "node:net";
 import { createInterface } from "node:readline";
 import chalk from "chalk";
 import { createApp } from "./app/create-app.js";
@@ -129,7 +129,7 @@ const tryStartServer = (
       );
 
       server.once("error", onError);
-      server.listen(port, () => {
+      server.listen(port, "0.0.0.0", () => {
         server.removeListener("error", onError);
         const address = server.address();
         const actualPort =
@@ -139,8 +139,7 @@ const tryStartServer = (
       });
     } else {
       // 对于 HTTP，先尝试用原生 net.Server 检查端口是否被占用
-      const net = require("node:net");
-      const testServer = net.createServer();
+      const testServer = createNetServer();
 
       testServer.once("error", (error: NodeJS.ErrnoException) => {
         if (error.code === "EADDRINUSE") {
@@ -157,6 +156,7 @@ const tryStartServer = (
             {
               fetch: app.fetch,
               port,
+              hostname: "0.0.0.0",
             },
             (info) => {
               onListening(info.port);
