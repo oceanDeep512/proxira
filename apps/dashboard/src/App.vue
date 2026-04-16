@@ -5,11 +5,19 @@ import SimpleBar from "simplebar-vue";
 import hljs from "highlight.js";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
+import markdown from "highlight.js/lib/languages/markdown";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+import Papa from "papaparse";
+import YAML from "js-yaml";
+import { XMLParser } from "fast-xml-parser";
+import xmlFormat from "xml-formatter";
 import "highlight.js/styles/github.css";
 
 // Register languages
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("yaml", yaml);
+hljs.registerLanguage("markdown", markdown);
 
 // Refs for code blocks to apply highlighting
 const requestBodyCodeRef = ref<HTMLElement>();
@@ -59,14 +67,42 @@ let toastId = 0;
 const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
 type BodyView = {
-  mode: "empty" | "binary" | "json" | "xml" | "form-urlencoded" | "html" | "yaml" | "text";
+  mode:
+    | "empty"
+    | "binary"
+    | "json"
+    | "xml"
+    | "form-urlencoded"
+    | "html"
+    | "yaml"
+    | "text"
+    | "csv"
+    | "markdown";
   jsonData: unknown | null;
   text: string;
   note: string;
   truncated: boolean;
+  previewHtml: string;
+  csvTable: {
+    headers: string[];
+    rows: string[][];
+    totalRows: number;
+    visibleRows: number;
+  } | null;
 };
 
 const BODY_COLLAPSE_THRESHOLD = 4_096;
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  trimValues: false,
+});
+
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+  async: false,
+});
 const METHOD_FILTER_OPTIONS = [
   { value: "ALL", label: "全部请求", hint: "不过滤 Method" },
   { value: "GET", label: "GET", hint: "读取类请求" },
@@ -239,6 +275,29 @@ const isTargetDuplicated = (normalizedTarget: string, ignoreGroupId?: string): b
   });
 };
 
+const resolveContentType = (headers: ProxyHeaders | null | undefined): string => {
+  if (!headers) {
+    return "";
+  }
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() !== "content-type") {
+      continue;
+    }
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (!raw) {
+      return "";
+    }
+    return raw.split(";")[0]?.trim().toLowerCase() ?? "";
+  }
+  return "";
+};
+
+const appendBodyNote = (primary: string, secondary: string): string => {
+  if (!primary) return secondary;
+  if (!secondary) return primary;
+  return `${primary} · ${secondary}`;
+};
+
 const safeParseJson = (text: string): unknown | null => {
   try {
     return JSON.parse(text);
@@ -260,7 +319,7 @@ const tryFixTruncatedJson = (text: string): unknown | null => {
   }
 
   // Count unclosed brackets/braces and try to close them
-  let stack: string[] = [];
+  const stack: string[] = [];
   let inString = false;
   let escapeNext = false;
 
@@ -318,35 +377,58 @@ const tryFixTruncatedJson = (text: string): unknown | null => {
   return null;
 };
 
-const formatXml = (xmlStr: string): string => {
+const fallbackFormatXml = (xmlStr: string): string => {
   let formatted = "";
   let indent = 0;
   const tab = "  ";
 
-  // Remove unnecessary whitespace
   xmlStr = xmlStr.trim().replace(/>\s*</g, "><");
-
-  const tokens = xmlStr.split(/(<[^>]+>)/g).filter((t) => t.trim());
+  const tokens = xmlStr.split(/(<[^>]+>)/g).filter((token) => token.trim());
 
   for (const token of tokens) {
     if (token.match(/^<\//)) {
-      // Closing tag
       indent = Math.max(0, indent - 1);
       formatted += tab.repeat(indent) + token + "\n";
     } else if (token.match(/^<[^/][^>]*[^/]>$/) && !token.match(/^<!/)) {
-      // Opening tag (not self-closing, not comment/doctype)
       formatted += tab.repeat(indent) + token + "\n";
       indent++;
     } else if (token.match(/^<[^/][^>]*\/>$/) || token.match(/^</)) {
-      // Self-closing tag, comment, doctype, etc.
       formatted += tab.repeat(indent) + token + "\n";
     } else {
-      // Text content
       formatted += tab.repeat(indent) + token + "\n";
     }
   }
 
   return formatted.trimEnd();
+};
+
+const formatXmlContent = (source: string): string => {
+  try {
+    return xmlFormat(source, {
+      indentation: "  ",
+      collapseContent: true,
+      lineSeparator: "\n",
+    });
+  } catch {
+    return fallbackFormatXml(source);
+  }
+};
+
+const safeParseXml = (source: string): unknown | null => {
+  try {
+    return xmlParser.parse(source);
+  } catch {
+    return null;
+  }
+};
+
+const safeParseYaml = (source: string): unknown | null => {
+  try {
+    const parsed = YAML.load(source);
+    return parsed === undefined ? null : parsed;
+  } catch {
+    return null;
+  }
 };
 
 const parseFormUrlEncoded = (text: string): Record<string, string | string[]> => {
@@ -373,7 +455,137 @@ const parseFormUrlEncoded = (text: string): Record<string, string | string[]> =>
   return result;
 };
 
-const parseBody = (body: ProxyPayloadBody | null): BodyView => {
+const sanitizeHtml = (source: string): string =>
+  DOMPurify.sanitize(source, {
+    USE_PROFILES: { html: true },
+  });
+
+const detectLikelyCsv = (text: string, contentType: string): boolean => {
+  if (contentType.includes("csv") || contentType.includes("tab-separated-values")) {
+    return true;
+  }
+
+  const lines = text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return false;
+  }
+
+  const sample = lines.slice(0, 5);
+  const delimiter = sample.some((line) => line.includes("\t"))
+    ? "\t"
+    : sample.some((line) => line.includes(",")) ? "," : "";
+  if (!delimiter) {
+    return false;
+  }
+
+  const widths = sample.map((line) => line.split(delimiter).length);
+  const min = Math.min(...widths);
+  const max = Math.max(...widths);
+  return min > 1 && max - min <= 1;
+};
+
+const parseCsvTable = (
+  text: string,
+): {
+  headers: string[];
+  rows: string[][];
+  totalRows: number;
+  visibleRows: number;
+} | null => {
+  const tryParse = (delimiter?: "," | "\t"): string[][] => {
+    const parsed = delimiter
+      ? Papa.parse<string[]>(text, { skipEmptyLines: "greedy", delimiter })
+      : Papa.parse<string[]>(text, { skipEmptyLines: "greedy" });
+    return parsed.data;
+  };
+
+  let rows = tryParse();
+  let maxColumns = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  if (maxColumns <= 1) {
+    rows = tryParse("\t");
+    maxColumns = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  }
+  if (!rows.length || maxColumns <= 1) {
+    return null;
+  }
+
+  const normalizedRows = rows.map((row) =>
+    Array.from({ length: maxColumns }, (_, index) => row[index] ?? ""),
+  );
+  const hasHeader = normalizedRows.length > 1 && normalizedRows[0].some((cell) => cell.trim().length > 0);
+  const headers = hasHeader
+    ? normalizedRows[0]
+    : Array.from({ length: maxColumns }, (_, index) => `Column ${index + 1}`);
+  const tableRows = hasHeader ? normalizedRows.slice(1) : normalizedRows;
+
+  return {
+    headers,
+    rows: tableRows,
+    totalRows: tableRows.length,
+    visibleRows: tableRows.length,
+  };
+};
+
+const detectLikelyMarkdown = (text: string, contentType: string): boolean => {
+  if (contentType.includes("markdown")) {
+    return true;
+  }
+  if (text.length > 500_000) {
+    return false;
+  }
+  return /(^|\n)(#{1,6}\s+\S+|[-*+]\s+\S+|>\s+\S+|\d+\.\s+\S+|```)/.test(text);
+};
+
+const renderMarkdownPreview = (source: string): string => {
+  const rendered = marked.parse(source);
+  const html = typeof rendered === "string" ? rendered : "";
+  return sanitizeHtml(html);
+};
+
+const bodyModeLabels: Record<BodyView["mode"], string> = {
+  empty: "空内容",
+  binary: "二进制",
+  json: "JSON",
+  xml: "XML",
+  "form-urlencoded": "Form URL Encoded",
+  html: "HTML",
+  yaml: "YAML",
+  text: "Text",
+  csv: "CSV",
+  markdown: "Markdown",
+};
+
+const bodyModeLabel = (body: BodyView): string => bodyModeLabels[body.mode];
+
+const bodyUsesJsonTree = (body: BodyView): boolean => body.jsonData !== null;
+
+const bodyUsesCsvTable = (body: BodyView): boolean => body.mode === "csv" && body.csvTable !== null;
+
+const bodyUsesRichPreview = (body: BodyView): boolean =>
+  (body.mode === "html" || body.mode === "markdown") && body.previewHtml.length > 0;
+
+const bodyUsesCodeBlock = (body: BodyView): boolean =>
+  (body.mode === "xml" || body.mode === "yaml" || body.mode === "html") && body.text.length > 0;
+
+const bodyHasRawSource = (body: BodyView): boolean =>
+  (body.mode === "xml" ||
+    body.mode === "yaml" ||
+    body.mode === "form-urlencoded" ||
+    body.mode === "csv") &&
+  body.text.length > 0;
+
+const bodyCodeClass = (body: BodyView): string =>
+  body.mode === "yaml"
+    ? "language-yaml"
+    : body.mode === "markdown"
+      ? "language-markdown"
+      : "language-xml";
+
+const parseBody = (body: ProxyPayloadBody | null, headers: ProxyHeaders | null | undefined): BodyView => {
   if (!body || body.text === null) {
     if (body?.isBinary) {
       return {
@@ -382,6 +594,8 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
         text: "",
         note: `binary body (${body.size} bytes)`,
         truncated: false,
+        previewHtml: "",
+        csvTable: null,
       };
     }
 
@@ -391,16 +605,27 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
       text: "",
       note: "(empty)",
       truncated: false,
+      previewHtml: "",
+      csvTable: null,
     };
   }
 
+  const contentType = resolveContentType(headers);
   const truncatedNote = body.truncated ? `已截断，原始 ${formatBytes(body.size)}` : "";
+  const trimmedText = body.text.trimStart();
+  const lowerTrimmed = trimmedText.toLowerCase();
+  const looksLikeHtml =
+    lowerTrimmed.startsWith("<!doctype html") ||
+    lowerTrimmed.includes("<html") ||
+    lowerTrimmed.includes("<head") ||
+    lowerTrimmed.includes("<body");
+  const looksLikeXml = trimmedText.startsWith("<?xml") || (trimmedText.startsWith("<") && !looksLikeHtml);
+  const looksLikeYaml = trimmedText.startsWith("---");
 
   // Prefer the format detected by backend
   switch (body.format) {
     case "json": {
       let jsonData = safeParseJson(body.text);
-      // If parsing failed and content was truncated, try to fix truncated JSON
       if (jsonData === null && body.truncated) {
         jsonData = tryFixTruncatedJson(body.text);
       }
@@ -411,6 +636,8 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
           text: "",
           note: truncatedNote,
           truncated: body.truncated,
+          previewHtml: "",
+          csvTable: null,
         };
       }
       break;
@@ -421,46 +648,56 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
         return {
           mode: "form-urlencoded",
           jsonData: parsed,
-          text: "",
+          text: body.text,
           note: truncatedNote,
           truncated: body.truncated,
+          previewHtml: "",
+          csvTable: null,
         };
       }
       break;
     }
-    case "xml":
+    case "xml": {
+      const parsed = safeParseXml(body.text);
       return {
         mode: "xml",
-        jsonData: null,
-        text: formatXml(body.text),
-        note: truncatedNote,
+        jsonData: parsed,
+        text: formatXmlContent(body.text),
+        note: appendBodyNote(parsed ? "已结构化展示 XML" : "", truncatedNote),
         truncated: body.truncated,
+        previewHtml: "",
+        csvTable: null,
       };
+    }
     case "html":
       return {
         mode: "html",
         jsonData: null,
-        text: formatXml(body.text),
-        note: truncatedNote,
+        text: formatXmlContent(body.text),
+        note: appendBodyNote("已渲染 HTML 预览", truncatedNote),
         truncated: body.truncated,
+        previewHtml: sanitizeHtml(body.text),
+        csvTable: null,
       };
-    case "yaml":
+    case "yaml": {
+      const parsed = safeParseYaml(body.text);
       return {
         mode: "yaml",
-        jsonData: null,
+        jsonData: parsed,
         text: body.text,
-        note: truncatedNote,
+        note: appendBodyNote(parsed ? "已结构化展示 YAML" : "", truncatedNote),
         truncated: body.truncated,
+        previewHtml: "",
+        csvTable: null,
       };
+    }
     case "text":
     case "binary":
     default:
       break;
   }
 
-  // Fallback: try to detect again on frontend
   let jsonData = safeParseJson(body.text);
-  // If parsing failed and content was truncated, try to fix truncated JSON
   if (jsonData === null && body.truncated) {
     jsonData = tryFixTruncatedJson(body.text);
   }
@@ -469,39 +706,101 @@ const parseBody = (body: ProxyPayloadBody | null): BodyView => {
       mode: "json",
       jsonData,
       text: "",
-      note: truncatedNote,
+      note: appendBodyNote("按内容识别为 JSON", truncatedNote),
       truncated: body.truncated,
+      previewHtml: "",
+      csvTable: null,
     };
   }
 
-  // Try to detect format from content
-  const trimmedText = body.text.trimStart();
-  let detectedMode: BodyView["mode"] = "text";
-  let displayText = body.text;
-
-  if (trimmedText.startsWith("<?xml") || trimmedText.startsWith("<")) {
-    const lowerText = trimmedText.toLowerCase();
-    if (
-      lowerText.includes("<!doctype html") ||
-      lowerText.includes("<html") ||
-      lowerText.includes("<head") ||
-      lowerText.includes("<body")
-    ) {
-      detectedMode = "html";
-    } else {
-      detectedMode = "xml";
+  if (contentType.includes("x-www-form-urlencoded")) {
+    const parsed = parseFormUrlEncoded(body.text);
+    if (Object.keys(parsed).length > 0) {
+      return {
+        mode: "form-urlencoded",
+        jsonData: parsed,
+        text: body.text,
+        note: appendBodyNote("按 Content-Type 解析 Form URL Encoded", truncatedNote),
+        truncated: body.truncated,
+        previewHtml: "",
+        csvTable: null,
+      };
     }
-    displayText = formatXml(body.text);
-  } else if (trimmedText.startsWith("---")) {
-    detectedMode = "yaml";
+  }
+
+  if (contentType.includes("xml") || looksLikeXml) {
+    const parsed = safeParseXml(body.text);
+    return {
+      mode: "xml",
+      jsonData: parsed,
+      text: formatXmlContent(body.text),
+      note: appendBodyNote(parsed ? "按内容识别为 XML（结构化）" : "按内容识别为 XML", truncatedNote),
+      truncated: body.truncated,
+      previewHtml: "",
+      csvTable: null,
+    };
+  }
+
+  if (contentType.includes("yaml") || contentType.includes("yml") || looksLikeYaml) {
+    const parsed = safeParseYaml(body.text);
+    return {
+      mode: "yaml",
+      jsonData: parsed,
+      text: body.text,
+      note: appendBodyNote(parsed ? "按内容识别为 YAML（结构化）" : "按内容识别为 YAML", truncatedNote),
+      truncated: body.truncated,
+      previewHtml: "",
+      csvTable: null,
+    };
+  }
+
+  if (contentType.includes("html") || looksLikeHtml) {
+    return {
+      mode: "html",
+      jsonData: null,
+      text: formatXmlContent(body.text),
+      note: appendBodyNote("按内容识别为 HTML", truncatedNote),
+      truncated: body.truncated,
+      previewHtml: sanitizeHtml(body.text),
+      csvTable: null,
+    };
+  }
+
+  if (detectLikelyCsv(body.text, contentType)) {
+    const table = parseCsvTable(body.text);
+    if (table) {
+      return {
+        mode: "csv",
+        jsonData: null,
+        text: body.text,
+        note: appendBodyNote("按内容识别为 CSV，已表格展示", truncatedNote),
+        truncated: body.truncated,
+        previewHtml: "",
+        csvTable: table,
+      };
+    }
+  }
+
+  if (detectLikelyMarkdown(body.text, contentType)) {
+    return {
+      mode: "markdown",
+      jsonData: null,
+      text: body.text,
+      note: appendBodyNote("按内容识别为 Markdown，已渲染预览", truncatedNote),
+      truncated: body.truncated,
+      previewHtml: renderMarkdownPreview(body.text),
+      csvTable: null,
+    };
   }
 
   return {
-    mode: detectedMode,
+    mode: "text",
     jsonData: null,
-    text: displayText,
+    text: body.text,
     note: truncatedNote,
     truncated: body.truncated,
+    previewHtml: "",
+    csvTable: null,
   };
 };
 
@@ -537,8 +836,7 @@ const requestBodyCollapsible = computed(() => {
   if (!body || body.size <= BODY_COLLAPSE_THRESHOLD) {
     return false;
   }
-  const mode = requestBodyView.value.mode;
-  return mode === "json" || mode === "text" || mode === "xml" || mode === "html" || mode === "yaml" || mode === "form-urlencoded";
+  return requestBodyView.value.mode !== "empty" && requestBodyView.value.mode !== "binary";
 });
 
 const responseBodyCollapsible = computed(() => {
@@ -546,8 +844,7 @@ const responseBodyCollapsible = computed(() => {
   if (!body || body.size <= BODY_COLLAPSE_THRESHOLD) {
     return false;
   }
-  const mode = responseBodyView.value.mode;
-  return mode === "json" || mode === "text" || mode === "xml" || mode === "html" || mode === "yaml" || mode === "form-urlencoded";
+  return responseBodyView.value.mode !== "empty" && responseBodyView.value.mode !== "binary";
 });
 
 const requestBodyCollapsed = computed(() => requestBodyCollapsible.value && !requestBodyExpanded.value);
@@ -573,7 +870,14 @@ const bodyViewToCopyText = (body: BodyView): string => {
   if (body.mode === "json" || body.mode === "form-urlencoded") {
     return toPrettyJson(body.jsonData ?? {});
   }
-  if (body.mode === "text" || body.mode === "xml" || body.mode === "html" || body.mode === "yaml") {
+  if (
+    body.mode === "text" ||
+    body.mode === "xml" ||
+    body.mode === "html" ||
+    body.mode === "yaml" ||
+    body.mode === "csv" ||
+    body.mode === "markdown"
+  ) {
     return body.text;
   }
   return body.note;
@@ -1234,8 +1538,18 @@ const confirmResetAll = async (): Promise<void> => {
   }
 };
 
-const requestBodyView = computed(() => parseBody(selectedRecord.value?.requestBody ?? null));
-const responseBodyView = computed(() => parseBody(selectedRecord.value?.responseBody ?? null));
+const requestBodyView = computed(() =>
+  parseBody(selectedRecord.value?.requestBody ?? null, selectedRecord.value?.requestHeaders),
+);
+const responseBodyView = computed(() =>
+  parseBody(selectedRecord.value?.responseBody ?? null, selectedRecord.value?.responseHeaders),
+);
+const requestBodyContentType = computed(() =>
+  resolveContentType(selectedRecord.value?.requestHeaders),
+);
+const responseBodyContentType = computed(() =>
+  resolveContentType(selectedRecord.value?.responseHeaders),
+);
 
 onMounted(async () => {
   try {
@@ -1487,7 +1801,11 @@ onBeforeUnmount(() => {
 
                   <article class="detail-card">
                     <div class="detail-card-head">
-                      <h3>Request Body</h3>
+                      <div class="detail-card-title">
+                        <h3>Request Body</h3>
+                        <span class="format-badge">{{ bodyModeLabel(requestBodyView) }}</span>
+                        <span v-if="requestBodyContentType" class="content-type-chip">{{ requestBodyContentType }}</span>
+                      </div>
                       <div class="detail-card-actions">
                         <button
                           class="mini-button"
@@ -1506,22 +1824,67 @@ onBeforeUnmount(() => {
                         </button>
                       </div>
                     </div>
+                    <pre v-if="requestBodyCollapsed">
+                      内容较大（{{ formatBytes(selectedRecord.requestBody.size) }}），已折叠，点击"展开"查看。
+                    </pre>
                     <JsonPretty
-                      v-if="(requestBodyView.mode === 'json' || requestBodyView.mode === 'form-urlencoded') && !requestBodyCollapsed"
+                      v-else-if="bodyUsesJsonTree(requestBodyView)"
                       class="json-view"
                       :data="requestBodyView.jsonData as any"
                     />
-                    <pre v-else-if="requestBodyCollapsed">
-                      内容较大（{{ formatBytes(selectedRecord.requestBody.size) }}），已折叠，点击"展开"查看。
-                    </pre>
+                    <div v-else-if="bodyUsesCsvTable(requestBodyView)" class="table-view">
+                      <div class="table-wrap">
+                        <table class="payload-table">
+                          <thead>
+                            <tr>
+                              <th v-for="(header, headerIndex) in requestBodyView.csvTable?.headers ?? []" :key="`req-header-${headerIndex}`">
+                                {{ header || `Column ${headerIndex + 1}` }}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(row, rowIndex) in requestBodyView.csvTable?.rows ?? []" :key="`req-row-${rowIndex}`">
+                              <td v-for="(cell, cellIndex) in row" :key="`req-cell-${rowIndex}-${cellIndex}`">
+                                {{ cell }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <p
+                        v-if="(requestBodyView.csvTable?.totalRows ?? 0) > (requestBodyView.csvTable?.visibleRows ?? 0)"
+                        class="sub-note table-note"
+                      >
+                        仅展示前 {{ requestBodyView.csvTable?.visibleRows ?? 0 }} 行，完整行数 {{ requestBodyView.csvTable?.totalRows ?? 0 }}。
+                      </p>
+                    </div>
+                    <div v-else-if="bodyUsesRichPreview(requestBodyView)" class="rich-preview-wrap">
+                      <div class="rich-preview" v-html="requestBodyView.previewHtml"></div>
+                      <details class="raw-source">
+                        <summary>查看原始内容</summary>
+                        <pre
+                          ref="requestBodyCodeRef"
+                          class="hljs"
+                          :class="bodyCodeClass(requestBodyView)"
+                        >{{ requestBodyView.text }}</pre>
+                      </details>
+                    </div>
                     <pre
-                      v-else-if="requestBodyView.mode === 'xml' || requestBodyView.mode === 'html' || requestBodyView.mode === 'yaml'"
+                      v-else-if="bodyUsesCodeBlock(requestBodyView)"
                       ref="requestBodyCodeRef"
                       class="hljs"
+                      :class="bodyCodeClass(requestBodyView)"
                     >{{ requestBodyView.text }}</pre>
                     <pre v-else>{{ (requestBodyView.mode === 'text') ? requestBodyView.text : requestBodyView.note }}</pre>
+                    <details
+                      v-if="!requestBodyCollapsed && bodyHasRawSource(requestBodyView)"
+                      class="raw-source"
+                    >
+                      <summary>查看原始内容</summary>
+                      <pre>{{ requestBodyView.text }}</pre>
+                    </details>
                     <div v-if="requestBodyView.truncated" class="truncated-warning">
-                      <p>内容已被截断，仅显示前 256KB。完整内容大小：{{ formatBytes(selectedRecord.requestBody.size) }}</p>
+                      <p>内容存在截断标记。记录大小：{{ formatBytes(selectedRecord.requestBody.size) }}</p>
                     </div>
                     <p v-if="requestBodyView.note && requestBodyView.mode !== 'empty' && !requestBodyView.truncated" class="sub-note">
                       {{ requestBodyView.note }}
@@ -1551,7 +1914,11 @@ onBeforeUnmount(() => {
 
                   <article class="detail-card">
                     <div class="detail-card-head">
-                      <h3>Response Body</h3>
+                      <div class="detail-card-title">
+                        <h3>Response Body</h3>
+                        <span class="format-badge">{{ bodyModeLabel(responseBodyView) }}</span>
+                        <span v-if="responseBodyContentType" class="content-type-chip">{{ responseBodyContentType }}</span>
+                      </div>
                       <div class="detail-card-actions">
                         <button
                           class="mini-button"
@@ -1570,22 +1937,70 @@ onBeforeUnmount(() => {
                         </button>
                       </div>
                     </div>
+                    <pre v-if="responseBodyCollapsed">
+                      内容较大（{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}），已折叠，点击"展开"查看。
+                    </pre>
                     <JsonPretty
-                      v-if="(responseBodyView.mode === 'json' || responseBodyView.mode === 'form-urlencoded') && !responseBodyCollapsed"
+                      v-else-if="bodyUsesJsonTree(responseBodyView)"
                       class="json-view"
                       :data="responseBodyView.jsonData as any"
                     />
-                    <pre v-else-if="responseBodyCollapsed">
-                      内容较大（{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}），已折叠，点击"展开"查看。
-                    </pre>
+                    <div v-else-if="bodyUsesCsvTable(responseBodyView)" class="table-view">
+                      <div class="table-wrap">
+                        <table class="payload-table">
+                          <thead>
+                            <tr>
+                              <th
+                                v-for="(header, headerIndex) in responseBodyView.csvTable?.headers ?? []"
+                                :key="`resp-header-${headerIndex}`"
+                              >
+                                {{ header || `Column ${headerIndex + 1}` }}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(row, rowIndex) in responseBodyView.csvTable?.rows ?? []" :key="`resp-row-${rowIndex}`">
+                              <td v-for="(cell, cellIndex) in row" :key="`resp-cell-${rowIndex}-${cellIndex}`">
+                                {{ cell }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <p
+                        v-if="(responseBodyView.csvTable?.totalRows ?? 0) > (responseBodyView.csvTable?.visibleRows ?? 0)"
+                        class="sub-note table-note"
+                      >
+                        仅展示前 {{ responseBodyView.csvTable?.visibleRows ?? 0 }} 行，完整行数 {{ responseBodyView.csvTable?.totalRows ?? 0 }}。
+                      </p>
+                    </div>
+                    <div v-else-if="bodyUsesRichPreview(responseBodyView)" class="rich-preview-wrap">
+                      <div class="rich-preview" v-html="responseBodyView.previewHtml"></div>
+                      <details class="raw-source">
+                        <summary>查看原始内容</summary>
+                        <pre
+                          ref="responseBodyCodeRef"
+                          class="hljs"
+                          :class="bodyCodeClass(responseBodyView)"
+                        >{{ responseBodyView.text }}</pre>
+                      </details>
+                    </div>
                     <pre
-                      v-else-if="responseBodyView.mode === 'xml' || responseBodyView.mode === 'html' || responseBodyView.mode === 'yaml'"
+                      v-else-if="bodyUsesCodeBlock(responseBodyView)"
                       ref="responseBodyCodeRef"
                       class="hljs"
+                      :class="bodyCodeClass(responseBodyView)"
                     >{{ responseBodyView.text }}</pre>
                     <pre v-else>{{ (responseBodyView.mode === 'text') ? responseBodyView.text : responseBodyView.note }}</pre>
+                    <details
+                      v-if="!responseBodyCollapsed && bodyHasRawSource(responseBodyView)"
+                      class="raw-source"
+                    >
+                      <summary>查看原始内容</summary>
+                      <pre>{{ responseBodyView.text }}</pre>
+                    </details>
                     <div v-if="responseBodyView.truncated" class="truncated-warning">
-                      <p>内容已被截断，仅显示前 256KB。完整内容大小：{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}</p>
+                      <p>内容存在截断标记。记录大小：{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}</p>
                     </div>
                     <p v-if="responseBodyView.note && responseBodyView.mode !== 'empty' && !responseBodyView.truncated" class="sub-note">
                       {{ responseBodyView.note }}

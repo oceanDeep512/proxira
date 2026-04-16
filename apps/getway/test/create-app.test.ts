@@ -245,6 +245,37 @@ describe("createApp", () => {
     );
   });
 
+  it("captures full response body in history even when responseBufferLimit is very small", async () => {
+    const fullPayload = JSON.stringify({
+      ok: true,
+      message: "this payload should be stored in full",
+    });
+    const upstreamFetch = vi.fn(async () => {
+      return new Response(fullPayload, {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    }) as typeof fetch;
+    const { app } = await createTestApp({
+      configOverrides: { responseBufferLimit: 1 },
+      fetchImpl: upstreamFetch,
+    });
+
+    const response = await app.request("/proxira/api/full");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(fullPayload);
+
+    const records = await app.request("/_proxira/api/records?limit=10");
+    const payload = await records.json();
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]?.responseBody).toMatchObject({
+      text: fullPayload,
+      truncated: false,
+      isBinary: false,
+      format: "json",
+    });
+  });
+
   it("supports proxying without a business prefix", async () => {
     const upstreamFetch = vi.fn(async () => {
       return new Response("ok", { status: 200 });

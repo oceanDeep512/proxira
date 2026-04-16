@@ -92,47 +92,6 @@ export class ProxyService {
 
     try {
       const upstreamResponse = await this.deps.fetch(upstreamUrl, upstreamRequest);
-      const responseContentLengthRaw =
-        upstreamResponse.headers.get("content-length");
-      const responseContentLength = responseContentLengthRaw
-        ? Number(responseContentLengthRaw)
-        : Number.NaN;
-
-      if (
-        Number.isFinite(responseContentLength) &&
-        responseContentLength > this.deps.config.responseBufferLimit
-      ) {
-        const responseHeaders = collectHeaders(upstreamResponse.headers);
-        this.runtime.addProxyRecord(
-          activeGroup.id,
-          this.createRecord({
-            groupId: activeGroup.id,
-            method,
-            path: incomingUrl.pathname,
-            query,
-            requestHeaders,
-            requestBody,
-            upstreamUrl: upstreamUrl.toString(),
-            responseStatus: upstreamResponse.status,
-            responseHeaders,
-            responseBody: {
-              text: null,
-              size: responseContentLength,
-              truncated: true,
-              isBinary: true,
-              format: "binary",
-            },
-            durationMs: this.deps.now() - startedAtMs,
-            error: null,
-          }),
-        );
-
-        return new Response(upstreamResponse.body, {
-          status: upstreamResponse.status,
-          headers: buildDownstreamHeaders(upstreamResponse.headers, method),
-        });
-      }
-
       const responseBuffer = await upstreamResponse
         .arrayBuffer()
         .catch(() => new ArrayBuffer(0));

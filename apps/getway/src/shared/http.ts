@@ -172,7 +172,7 @@ export const collectQuery = (url: URL): ProxyQueryParams => {
 export const collectBody = (
   bytes: Uint8Array,
   contentType: string | null,
-  bodyLimit: number,
+  _bodyLimit: number,
 ): ProxyPayloadBody => {
   if (bytes.length === 0) {
     return {
@@ -197,12 +197,10 @@ export const collectBody = (
     };
   }
 
-  const truncated = bytes.length > bodyLimit;
-  const visibleBytes = truncated ? bytes.slice(0, bodyLimit) : bytes;
   return {
-    text: textDecoder.decode(visibleBytes),
+    text: textDecoder.decode(bytes),
     size: bytes.length,
-    truncated,
+    truncated: false,
     isBinary: false,
     format,
   };

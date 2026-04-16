@@ -820,6 +820,14 @@ body::before {
   gap: 8px;
 }
 
+.detail-card-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .detail-card-actions {
   display: inline-flex;
   gap: 6px;
@@ -832,6 +840,34 @@ body::before {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-soft);
+}
+
+.format-badge,
+.content-type-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.format-badge {
+  color: color-mix(in srgb, var(--accent-strong) 82%, var(--text));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+
+.content-type-chip {
+  color: var(--text-soft);
+  max-width: min(100%, 320px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mini-button {
@@ -863,6 +899,89 @@ body::before {
   line-height: 1.56;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.table-view {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 340px;
+}
+
+.payload-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.payload-table th,
+.payload-table td {
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.payload-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--surface-soft) 92%, var(--surface));
+  color: var(--text);
+}
+
+.table-note {
+  margin: 6px 8px;
+}
+
+.rich-preview-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.rich-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.rich-preview img {
+  max-width: 100%;
+  height: auto;
+}
+
+.raw-source {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-soft) 82%, var(--surface));
+  overflow: hidden;
+}
+
+.raw-source > summary {
+  padding: 6px 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.raw-source > summary:hover {
+  color: var(--accent-strong);
 }
 
 .detail-error {

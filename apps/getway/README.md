@@ -208,7 +208,7 @@ npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.
 | `PROXY_DATA_DIR` | 本地数据目录 | `./.proxira` |
 | `PROXY_PREFIX` | 代理请求前缀 | `/proxira` |
 | `PROXY_PREFIX_ENABLED` | 关闭代理请求前缀 | 未设置 |
-| `PROXY_BODY_LIMIT` | 请求/响应体截断大小 | - |
+| `PROXY_BODY_LIMIT` | 兼容保留（当前版本不再截断展示，实际不生效） | - |
 | `PROXY_HISTORY_LIMIT` | 内存历史记录上限 | `1000` |
 | `PROXY_HISTORY_PERSIST_LIMIT` | 持久化历史记录上限 | `200` |
 | `PROXY_QUERY_LIMIT_MAX` | 记录查询接口最大分页值 | - |

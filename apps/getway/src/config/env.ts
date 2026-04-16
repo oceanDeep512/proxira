@@ -96,10 +96,12 @@ export const loadRuntimeConfig = (
     internalRoutePrefix: INTERNAL_ROUTE_PREFIX,
     defaultProxyPrefix: DEFAULT_PROXY_PREFIX,
     serverPort: Number(env.PORT ?? 3000),
-    bodyLimit: normalizePositiveInteger(env.PROXY_BODY_LIMIT, 256 * 1024), // 256KB
+    // Kept for backward compatibility. Body collection no longer truncates payload text.
+    bodyLimit: normalizePositiveInteger(env.PROXY_BODY_LIMIT, 256 * 1024),
     maxQueryLimit: normalizePositiveInteger(env.PROXY_QUERY_LIMIT_MAX, 500),
     sseHeartbeatMs: normalizePositiveInteger(env.PROXY_SSE_HEARTBEAT_MS, 15_000),
     requestContentLengthLimit,
+    // Kept for backward compatibility. Response capture no longer truncates by buffer size.
     responseBufferLimit,
     historyLimit,
     historyPersistLimit,
