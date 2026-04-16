@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 88" role="img" aria-labelledby="title desc">
+  <title id="title">Proxira Logo</title>
+  <desc id="desc">Minimal Proxira logo showing raw payload, proxy flow, and live capture.</desc>
+  <rect x="8" y="8" width="72" height="72" rx="16" fill="#0F172A" />
+  <path d="M34 27L23 44L34 61" fill="none" stroke="#F8FAFC" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M54 27L65 44L54 61" fill="none" stroke="#F8FAFC" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M36 35H52" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" />
+  <path d="M47 31L52 35L47 39" fill="none" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M50 53H34" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" />
+  <path d="M39 49L34 53L39 57" fill="none" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="66" cy="22" r="3" fill="#22C55E" />
+  <text x="96" y="56" fill="#0F172A" font-size="38" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="700" letter-spacing="0.8">
+    proxira
+  </text>
+</svg>
