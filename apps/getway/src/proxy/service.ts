@@ -120,6 +120,7 @@ export class ProxyService {
               size: responseContentLength,
               truncated: true,
               isBinary: true,
+              format: "binary",
             },
             durationMs: this.deps.now() - startedAtMs,
             error: null,

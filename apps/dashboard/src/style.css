@@ -229,6 +229,21 @@ body::before {
   line-height: 1.45;
 }
 
+.truncated-warning {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed color-mix(in srgb, var(--error) 40%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--error) 8%, var(--surface-soft));
+}
+
+.truncated-warning p {
+  margin: 0;
+  color: color-mix(in srgb, var(--error) 80%, var(--text));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(200px, 260px));
@@ -903,6 +918,110 @@ body::before {
 
   .json-view .vjs-value-null,
   .json-view .vjs-value-undefined {
+    color: #fbbf24;
+  }
+}
+
+/* Highlight.js customization */
+.detail-card pre.hljs {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.56;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 7px;
+}
+
+/* Light mode highlight colors */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link {
+  color: #7c3aed;
+}
+
+.hljs-string,
+.hljs-title,
+.hljs-name,
+.hljs-type,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition,
+.hljs-variable,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: #047857;
+}
+
+.hljs-number,
+.hljs-meta {
+  color: #1d4ed8;
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-deletion {
+  color: #6b7280;
+}
+
+.hljs-title.class_,
+.hljs-class .hljs-title {
+  color: #be185d;
+}
+
+.hljs-attr,
+.hljs-variable.language_ {
+  color: #b45309;
+}
+
+/* Dark mode highlight colors */
+@media (prefers-color-scheme: dark) {
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-section,
+  .hljs-link {
+    color: #a78bfa;
+  }
+
+  .hljs-string,
+  .hljs-title,
+  .hljs-name,
+  .hljs-type,
+  .hljs-attribute,
+  .hljs-symbol,
+  .hljs-bullet,
+  .hljs-addition,
+  .hljs-variable,
+  .hljs-template-tag,
+  .hljs-template-variable {
+    color: #6ee7b7;
+  }
+
+  .hljs-number,
+  .hljs-meta {
+    color: #93c5fd;
+  }
+
+  .hljs-comment,
+  .hljs-quote,
+  .hljs-deletion {
+    color: #9ca3af;
+  }
+
+  .hljs-title.class_,
+  .hljs-class .hljs-title {
+    color: #f472b6;
+  }
+
+  .hljs-attr,
+  .hljs-variable.language_ {
     color: #fbbf24;
   }
 }

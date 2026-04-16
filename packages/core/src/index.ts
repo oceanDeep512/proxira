@@ -4,11 +4,14 @@ export type ProxyHeaders = Record<string, ProxyHeaderValue>;
 export type ProxyQueryValue = string | string[];
 export type ProxyQueryParams = Record<string, ProxyQueryValue>;
 
+export type BodyFormat = "json" | "xml" | "form-urlencoded" | "html" | "yaml" | "text" | "binary";
+
 export interface ProxyPayloadBody {
   text: string | null;
   size: number;
   truncated: boolean;
   isBinary: boolean;
+  format: BodyFormat;
 }
 
 export interface ProxyConfig {

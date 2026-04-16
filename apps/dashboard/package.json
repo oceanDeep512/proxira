@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@proxira/core": "workspace:*",
+    "highlight.js": "^11.11.1",
     "simplebar": "^6.3.3",
     "simplebar-vue": "^2.4.2",
     "vue": "^3.5.32",
