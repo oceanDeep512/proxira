@@ -1,296 +1,259 @@
-# Proxira
+<p align="center">
+  <img src="apps/dashboard/public/favicon.svg" width="64" alt="Proxira logo" />
+</p>
 
-> 轻量化实时请求代理工具 —— 让本地开发联调更高效
+<h1 align="center">Proxira</h1>
 
-Proxira 是一个**本地开发联调用的实时请求代理与观测工具**。
-它在本地启动代理端口，将请求转发到真实上游服务，并通过 Web 控制面板实时展示请求、响应、耗时与错误信息。
+<p align="center">
+  轻量化实时请求代理工具：本地转发 + 可视化观测面板
+</p>
 
-## 项目作用
+<p align="center">
+  <a href="https://www.npmjs.com/package/proxira"><img alt="npm version" src="https://img.shields.io/npm/v/proxira"></a>
+  <img alt="node" src="https://img.shields.io/badge/node-%3E%3D20-339933">
+  <img alt="pnpm" src="https://img.shields.io/badge/pnpm-10-F69220">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
+</p>
 
-- 让 SDK / 前端 / 客户端请求统一走本地代理，便于观测与排查
-- 在不改业务请求代码的前提下，快速切换真实上游地址
-- 对请求数据进行"可视化追踪"：状态码、耗时、Headers、Body、错误等
-- 支持并行调试多环境（如 dev / test / staging）
+Proxira 是一个面向本地开发联调的代理与观测工具。你可以把前端、SDK、脚本请求统一指向本地代理入口，再通过 Web 管理面板实时查看请求/响应、耗时、错误、分组配置等信息。
 
-## 适用场景
-
-- 联调时快速确认请求参数是否正确
-- 排查接口异常（4xx / 5xx / 网络错误）
-- 对比不同上游环境的返回差异
-- 导出记录用于问题复盘与协作沟通
+> [!IMPORTANT]
+> Proxira 的定位是本地开发调试工具，不建议直接暴露在公网环境。
 
 ## 核心能力
 
-### 代理与转发
+- 透明代理转发：保留 Method / Path / Query / Headers / Body。
+- 实时观测：SSE 推送请求事件，面板实时更新。
+- 多分组管理：每个分组独立上游地址与历史记录。
+- 便捷排查：支持状态筛选、方法筛选、耗时排序、时间排序。
+- 数据导出：历史记录支持导出 JSON。
+- 详情复制：一键复制 URL、Headers、Body、cURL。
+- HTTPS 本地调试：支持一键生成自签名证书并启用 HTTPS。
+- 多格式展示：JSON / XML / YAML / HTML / CSV / Markdown / Text。
 
-- 请求透明转发（Path / Query / Headers / Body）
-- 支持 HTTP 和 HTTPS 上游服务
-- 支持自定义代理前缀或无前缀模式
-- 支持 HTTPS 服务模式（需提供证书）
-- SSE 实时推送请求事件
+> [!NOTE]
+> 当前版本代理记录对请求/响应正文按“全量记录”策略处理，不再按 `PROXY_BODY_LIMIT` 截断。
 
-### 多分组管理
+## 架构概览
 
-- 每个分组独立上游地址与历史记录
-- 快速切换不同环境（dev / test / staging）
+```mermaid
+flowchart LR
+  Client[Client / SDK / Frontend] --> Proxy[Proxira Proxy Service]
+  Proxy --> Upstream[Target Upstream API]
+  Proxy --> Runtime[Runtime Store]
+  Runtime --> SSE[SSE /_proxira/api/events]
+  Runtime --> API[Internal API /_proxira/api/*]
+  API --> Dashboard[Dashboard UI /_proxira/ui]
+  Dashboard --> SSE
+```
 
-### 请求记录
+- `apps/getway`：Node.js 代理服务 + CLI（npm 包主体）。
+- `apps/dashboard`：Vue 3 + Vite 管理面板。
+- `packages/core`：前后端共享类型定义。
 
-- 记录查询、删除、清空、导出 JSON
-- 详情一键复制（URL / Headers / Body / cURL）
-- 请求体/响应体自动识别（JSON / Text / Binary）
-
-### 过滤与排序
-
-- Method 过滤
-- Status 过滤（2xx / 3xx / 4xx / 5xx / ERR）
-- 时间排序（新→旧、旧→新）
-- 耗时排序（高→低、低→高）
-
-### UI 体验
-
-- Dashboard 自动跟随系统明暗主题
-- 三个主滚动区域采用 `SimpleBar` 自定义滚动条，暗色模式可读性已适配：
-  - 历史请求列表
-  - 请求内容列
-  - 响应内容列
-
-## Monorepo 结构
+## 仓库结构
 
 ```text
 proxira/
 ├─ apps/
-│  ├─ getway/              # 代理服务 + CLI（npm 包主体）
-│  └─ dashboard/           # Vue 3 + Vite 控制面板
+│  ├─ getway/       # 代理服务、CLI、内部 API、SSE、打包入口
+│  └─ dashboard/    # Vue 管理面板
 ├─ packages/
-│  └─ core/                # 前后端共享类型
-├─ package.json            # 根脚本（开发/构建/启动）
+│  └─ core/         # 共享 types
+├─ package.json     # Monorepo 根脚本
 └─ pnpm-workspace.yaml
 ```
 
-## 技术栈
-
-| 层级    | 技术选型          |
-| ------- | ----------------- |
-| 后端服务 | Hono (Node.js)    |
-| 前端面板 | Vue 3 + Vite      |
-| 类型验证 | Zod               |
-| 构建工具 | TypeScript + tsx  |
-| 包管理   | pnpm workspace    |
-
 ## 快速开始
 
-### 方式一：CLI 方式（推荐）
+### npm 仓库说明
+
+- npm 包名：`proxira`
+- npm 地址：`https://www.npmjs.com/package/proxira`
+- 可执行命令：`proxira`
+- 发布来源：`apps/getway`（仓库根目录是 monorepo 管理脚本，`private: true`，不会发布到 npm）
+
+推荐使用方式：
 
 ```bash
-# 直接使用 npx
-npx proxira --help
-npx proxira --port 3010 --target http://localhost:8080
-npx proxira -x /debug-proxy --target http://localhost:8080
-npx proxira -X --target http://localhost:8080
+# 临时使用最新版（推荐）
+npx proxira@latest
+
+# 固定版本使用（便于团队复现）
+npx proxira@0.1.3
+
+# 全局安装
+npm i -g proxira
 ```
 
-### 方式二：仓库方式
+包内主要包含：
+
+- `dist/`：CLI 与代理服务可执行代码
+- `dashboard-dist/`：管理面板静态资源
+- `README.md`：npm 展示文档
+
+### 方式一：直接使用 npx（推荐）
+
+```bash
+npx proxira
+```
+
+默认访问地址：
+
+- 代理入口：`http://localhost:3000/proxira`
+- 管理面板：`http://localhost:3000/_proxira/ui`
+- 健康检查：`http://localhost:3000/_proxira/api/health`
+
+### 方式二：本地仓库开发
 
 ```bash
 # 1) 安装依赖
 pnpm install
 
-# 2) 构建完整应用（dashboard + getway）
+# 2) 构建应用（dashboard + getway）
 pnpm run build:app
 
 # 3) 启动代理服务
 pnpm run start:app
 ```
 
-### 启动后访问
+## 常见使用方式
 
-- 代理入口：`http://localhost:3000/proxira`（默认）
-- 管理面板：`http://localhost:3000/_proxira/ui`
-- 健康检查：`http://localhost:3000/_proxira/api/health`
-
-### HTTPS 模式快速开始
+### 指定端口和上游
 
 ```bash
-# 1) 生成自签名证书
+npx proxira --port 3010 --target http://localhost:8080
+```
+
+### 自定义代理前缀
+
+```bash
+npx proxira --prefix /debug-proxy --target http://localhost:8080
+```
+
+### 关闭前缀（直转发）
+
+```bash
+npx proxira --no-prefix --target http://localhost:8080
+```
+
+> [!TIP]
+> 关闭前缀后，`/_proxira/*` 仍保留给管理面板与内部 API，其余路径会转发到上游。
+
+## HTTPS 调试模式
+
+```bash
+# 1) 生成本地证书（带环境检测）
 npx proxira gen-cert
 
-# 2) 使用生成的证书启动 HTTPS 服务
+# 2) 启动 HTTPS
+npx proxira --https
+```
+
+手动指定证书：
+
+```bash
 npx proxira --https --https-key ./.proxira/certs/key.pem --https-cert ./.proxira/certs/cert.pem
 ```
 
-启动后访问：
-- 代理入口：`https://localhost:3000/proxira`
-- 管理面板：`https://localhost:3000/_proxira/ui`
-
-**注意**：使用自签名证书时，浏览器会提示安全警告，这是正常的。点击"高级" → "继续访问"即可。
-
-## 智能证书生成向导
-
-`gen-cert` 子命令提供智能环境检测和友好的安装指引：
-
-### 功能特性
-
-- ✅ **自动系统检测**：识别 macOS、Windows、Linux
-- ✅ **OpenSSL 检测**：检查是否已安装 OpenSSL
-- ✅ **智能安装指引**：
-  - macOS：检测 Homebrew，提供 `brew install openssl`
-  - Windows：检测 Chocolatey，提供 `choco install openssl`
-  - Linux：检测 apt，提供 `sudo apt-get install openssl`
-- ✅ **友好确认提示**：生成前显示配置摘要，等待用户确认
-- ✅ **一键跳过确认**：使用 `--yes` 参数直接执行
-
-### 使用流程
+## CLI 命令
 
 ```bash
-# 1) 运行证书生成向导
-npx proxira gen-cert
-
-# 2) 如果 OpenSSL 未安装，按提示安装
-#    macOS: brew install openssl
-#    Windows: choco install openssl
-#    Linux: sudo apt-get install openssl
-
-# 3) 重新运行生成向导
-npx proxira gen-cert
-
-# 4) 确认配置后，证书自动生成
-
-# 5) 使用生成的证书启动 HTTPS 服务
-npx proxira --https --https-key ./.proxira/certs/key.pem --https-cert ./.proxira/certs/cert.pem
-```
-
-### 跳过确认模式
-
-```bash
-# 直接生成证书，无需确认
-npx proxira gen-cert --yes
-```
-
-## CLI 命令参考
-
-```bash
-# 基本用法
 proxira [options]
 proxira clear-cache [options]
 proxira gen-cert [options]
-
-# 参数说明
--p, --port <port>          代理服务端口，默认 3000
--t, --target <url>         上游服务地址（例如 http://localhost:8080）
--d, --data-dir <path>      配置目录（默认 ./.proxira）
--x, --prefix <path>        自定义代理前缀，默认 /proxira
--nx, --no-prefix            关闭代理前缀，直接转发非 /_proxira 请求
--s, --https                启用 HTTPS 服务模式
---https-key <path>         HTTPS 私钥文件路径
---https-cert <path>        HTTPS 证书文件路径
--b, --no-banner            关闭启动 Banner 输出
--h, --help                 查看帮助信息
--v, --version              查看当前 CLI 版本
-
-# gen-cert 专用参数
--o, --output-dir <path>    证书输出目录（默认 ./.proxira/certs）
--c, --common-name <name>   证书通用名（默认 localhost）
---days <number>            证书有效期天数（默认 365）
--y, --yes                  跳过确认提示，直接执行
-
-# 子命令
-clear-cache                清除本地缓存（配置 + 历史记录）
-gen-cert                   生成自签名 HTTPS 证书（自动检测环境）
-
-# 示例
-proxira
-proxira --port 3010 --target http://localhost:8080
-# 默认业务请求需走 /proxira 前缀，例如：http://localhost:3010/proxira/api/users
-proxira -x /debug-proxy --target http://localhost:8080
-proxira -nx --target http://localhost:8080
-proxira -b -p 3010 -t http://localhost:8080
-proxira --port=3010 --target=http://localhost:8080
-proxira -p 3001 -d ./.proxira
-
-# 证书生成示例（智能检测）
-proxira gen-cert
-proxira gen-cert -o ./my-certs -c myapp.local --days 730
-proxira gen-cert --yes  # 跳过确认提示
-
-# HTTPS 模式示例（配合生成的证书使用）
-proxira --https --https-key ./.proxira/certs/key.pem --https-cert ./.proxira/certs/cert.pem
-proxira -s --https-key ./.proxira/certs/key.pem --https-cert ./.proxira/certs/cert.pem --port 3443
-
-proxira clear-cache
-proxira clear-cache --data-dir ./.proxira
 ```
 
-## 常用开发命令
+常用参数：
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-p, --port <port>` | 服务端口 | `3000` |
+| `-t, --target <url>` | 上游服务地址 | `http://localhost:8080` |
+| `-d, --data-dir <path>` | 数据目录 | `./.proxira` |
+| `-x, --prefix <path>` | 自定义代理前缀 | `/proxira` |
+| `-nx, --no-prefix` | 关闭代理前缀 | - |
+| `-s, --https` | 启用 HTTPS | - |
+| `--https-key <path>` | HTTPS 私钥路径 | - |
+| `--https-cert <path>` | HTTPS 证书路径 | - |
+| `-b, --no-banner` | 关闭启动 Banner | - |
+| `-h, --help` | 帮助信息 | - |
+| `-v, --version` | 版本信息 | - |
+
+`gen-cert` 参数：
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `-o, --output-dir <path>` | 证书输出目录 | `./.proxira/certs` |
+| `-c, --common-name <name>` | 证书通用名 | `localhost` |
+| `--days <number>` | 证书有效期（天） | `365` |
+| `-y, --yes` | 跳过确认直接生成 | - |
+
+## 开发命令（Monorepo）
 
 ```bash
-# 后端开发（watch）
+# 后端 watch
 pnpm run dev:getway
 
-# 前端开发（Vite）
+# 前端 dev server
 pnpm run dev:dashboard
 
-# 构建所有包
+# 构建全部
 pnpm run build
 
-# 构建应用并打包 CLI 产物
+# 构建可发布应用（含 dashboard-dist）
 pnpm run build:app
+
+# 打包 CLI（tgz）
 pnpm run pack:cli
 ```
 
-## 推荐使用流程
+## 环境变量
 
-1. 将业务请求指向 Proxira 代理入口（默认如 `http://localhost:3000/proxira`，也可通过 CLI 自定义或关闭前缀）。
-2. 打开 Dashboard 观察实时请求列表。
-3. 通过过滤与排序快速定位目标请求。
-4. 在详情区检查 Query / Headers / Body / Response / Error。
-5. 使用分组切换不同上游环境。
-6. 需要留档时导出 JSON。
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `PORT` | 服务端口 | `3000` |
+| `PROXY_TARGET_URL` | 默认上游地址 | `http://localhost:8080` |
+| `PROXY_DATA_DIR` | 本地数据目录 | `./.proxira` |
+| `PROXY_PREFIX` | 代理前缀 | `/proxira` |
+| `PROXY_PREFIX_ENABLED` | 是否启用代理前缀 | 启用 |
+| `PROXY_BODY_LIMIT` | 兼容保留（当前版本不生效） | - |
+| `PROXY_HISTORY_LIMIT` | 内存历史上限 | `1000` |
+| `PROXY_HISTORY_PERSIST_LIMIT` | 落盘历史上限 | `200` |
+| `PROXY_QUERY_LIMIT_MAX` | 查询接口最大 limit | `500` |
+| `PROXY_SSE_HEARTBEAT_MS` | SSE 心跳间隔（毫秒） | `15000` |
+| `PROXY_DISABLE_BANNER` | 是否关闭启动 Banner | 关闭为 `1` |
+| `PROXY_HTTPS_ENABLED` | 是否启用 HTTPS | 关闭 |
+| `PROXY_HTTPS_KEY_PATH` | HTTPS 私钥路径 | - |
+| `PROXY_HTTPS_CERT_PATH` | HTTPS 证书路径 | - |
 
 ## 管理接口（概览）
 
-| 方法   | 路径                            | 说明                                   |
-| ------ | ------------------------------- | -------------------------------------- |
-| GET    | `/_proxira/api/health`         | 健康检查                               |
-| GET    | `/_proxira/api/status`         | 服务状态                               |
-| GET    | `/_proxira/api/config`         | 读取分组配置与当前激活分组             |
-| PUT    | `/_proxira/api/config`         | 切换激活分组                           |
-| POST   | `/_proxira/api/groups`         | 创建分组                               |
-| PUT    | `/_proxira/api/groups/:id`     | 更新分组信息                           |
-| DELETE | `/_proxira/api/groups/:id`     | 删除分组并清理分组数据                 |
-| GET    | `/_proxira/api/records`        | 查询历史记录（支持 `groupId`）         |
-| GET    | `/_proxira/api/records/export` | 导出记录（支持筛选参数）               |
-| GET    | `/_proxira/api/records/:id`    | 查询单条记录                           |
-| DELETE | `/_proxira/api/records/:id`    | 删除单条记录                           |
-| DELETE | `/_proxira/api/records`        | 清空当前分组记录                       |
-| GET    | `/_proxira/api/events`         | SSE 实时事件流                         |
-| POST   | `/_proxira/api/reset`          | 重置分组与历史数据                     |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/_proxira/api/health` | 健康检查 |
+| `GET` | `/_proxira/api/status` | 服务状态 |
+| `GET` | `/_proxira/api/config` | 读取当前配置 |
+| `PUT` | `/_proxira/api/config` | 切换激活分组 |
+| `POST` | `/_proxira/api/groups` | 创建分组 |
+| `PUT` | `/_proxira/api/groups/:id` | 更新分组 |
+| `DELETE` | `/_proxira/api/groups/:id` | 删除分组 |
+| `GET` | `/_proxira/api/records` | 查询历史 |
+| `GET` | `/_proxira/api/records/export` | 导出记录 |
+| `DELETE` | `/_proxira/api/records/:id` | 删除单条 |
+| `DELETE` | `/_proxira/api/records` | 清空分组历史 |
+| `GET` | `/_proxira/api/events` | SSE 事件流 |
+| `POST` | `/_proxira/api/reset` | 重置数据 |
 
-## 关键环境变量
+## 测试
 
-| 变量名                        | 说明                           | 默认值                  |
-| ----------------------------- | ------------------------------ | ----------------------- |
-| `PORT`                        | 服务端口                       | `3000`                  |
-| `PROXY_TARGET_URL`            | 默认分组上游地址               | `http://localhost:8080` |
-| `PROXY_DATA_DIR`              | 本地数据目录                   | `./.proxira`            |
-| `PROXY_PREFIX`                | 代理请求前缀                   | `/proxira`              |
-| `PROXY_PREFIX_ENABLED`        | 关闭代理请求前缀               | 未设置                  |
-| `PROXY_BODY_LIMIT`            | 请求/响应体截断大小            | -                       |
-| `PROXY_HISTORY_LIMIT`         | 内存历史记录上限               | -                       |
-| `PROXY_HISTORY_PERSIST_LIMIT` | 持久化历史记录上限             | -                       |
-| `PROXY_QUERY_LIMIT_MAX`       | 记录查询接口最大分页值         | -                       |
-| `PROXY_SSE_HEARTBEAT_MS`      | SSE 心跳间隔（毫秒）           | -                       |
-| `PROXY_DISABLE_BANNER`        | 关闭启动 Banner                | 未设置                  |
-| `PROXY_HTTPS_ENABLED`         | 启用 HTTPS 服务模式            | 未设置                  |
-| `PROXY_HTTPS_KEY_PATH`        | HTTPS 私钥文件路径             | -                       |
-| `PROXY_HTTPS_CERT_PATH`       | HTTPS 证书文件路径             | -                       |
+```bash
+# getway 单元/集成测试
+pnpm --filter ./apps/getway test
 
-## 注意事项
+# dashboard 构建校验
+pnpm --filter @proxira/dashboard build
+```
 
-- Proxira 定位为本地联调工具，请勿直接暴露公网使用。
-- 默认会记录请求与响应内容，涉及敏感数据时请谨慎处理。
-- 管理面板和内部 API 固定保留在 `/_proxira/*`，自定义前缀仅影响业务代理入口。
-
-## License
-
-MIT
+> [!WARNING]
+> 默认会记录请求与响应正文，请在真实数据联调时注意敏感信息处理。
