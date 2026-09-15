@@ -22,6 +22,10 @@ Proxira 是一个**本地开发联调用的实时请求代理与观测工具**�
 - **请求记录** - 记录查询、删除、清空、导出 JSON
 - **详情复制** - 一键复制 URL / Headers / Body / cURL
 - **过滤排序** - Method 过滤、Status 过滤、时间排序、耗时排序
+- **拦截规则** - Mock、模拟错误、延迟、流式中断、响应截断，按路径/方法匹配
+- **请求重放** - 改完参数直接重发上游，并与原响应做逐行差异对比
+- **敏感信息脱敏** - `authorization` / `cookie` / `api_key` 等默认打码，可一键看原文
+- **可选访问令牌** - `--token` 保护内部 API 与 SSE 事件流
 
 ## 快速开始
 
@@ -105,6 +109,7 @@ proxira gen-cert [options]
 | `-x, --prefix <path>` | 自定义代理前缀 | `/proxira` |
 | `-nx, --no-prefix` | 关闭代理前缀 | - |
 | `-b, --no-banner` | 关闭启动 Banner | - |
+| `--token <token>` | 为内部 API / SSE 设置访问令牌 | 关闭 |
 | `-h, --help` | 查看帮助 | - |
 | `-v, --version` | 查看版本 | - |
 
@@ -218,6 +223,48 @@ npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.
 - 详情支持一键复制 URL / Headers / Body / cURL
 - 多分组管理，独立历史记录
 - 实时 SSE 推送请求事件
+- 流式响应按采样增量上屏（不为观测而完整缓冲，避免拖住请求）
+- 记录超过 500 条时可点「加载更多」继续翻页
+
+## 分组级超时
+
+在面板「编辑当前分组」里可单独设置上游超时（毫秒），留空则回落到全局的
+`PROXY_UPSTREAM_TIMEOUT_MS`（默认 30s）。适合某个上游特别慢、又不想把全局超时调大的场景。
+
+## 拦截规则（Mock / 故障注入）
+
+规则挂在分组上，按「路径包含 + 方法」匹配，命中的请求不再打上游：
+
+| 动作 | 作用 | 典型场景 |
+| --- | --- | --- |
+| `mock` | 返回预设状态码与 body，可勾选以 SSE 分片下发 | 上游还没写好、想固定返回内容 |
+| `error` | 直接以指定状态码失败，不请求上游 | 复现 5xx / 网关错误 |
+| `delay` | 先等待 N 毫秒再正常转发 | 复现慢请求、验证前端 loading |
+| `break_stream` | 流式响应在第 N 个分片后断开 | 复现 SSE / LLM 流式中断 |
+| `truncate` | 只保留响应前 N 字节后断开 | 复现响应截断、JSON 解析失败 |
+
+面板工具栏「拦截规则」可增删改与启停，停用后立刻恢复真实转发；命中的记录会带「规则」标记。
+
+## 请求重放与差异对比
+
+选中记录后点「重放请求」，表单已按原请求预填，可直接改参数再发送；结果会展示状态码、耗时，
+以及与原响应的逐行差异。重放**不经过拦截规则**，看到的始终是上游真实行为；结果写入历史并标记「重放」。
+
+## 敏感信息脱敏
+
+默认对展示层打码，不改落盘数据：Headers 中的 `authorization` / `cookie` / `x-api-key` 等键、
+JSON 正文中同名键的值、文本正文里的 `Authorization: Bearer ...` 片段。复制 cURL 同样遵循当前脱敏状态，
+点工具栏眼睛图标可在「脱敏 / 原文」间切换。
+
+## 访问令牌（可选）
+
+```bash
+npx proxira --token my-secret
+```
+
+启用后 `/_proxira/api/*`（含 SSE）必须携带令牌，否则 401；可通过 `Authorization: Bearer my-secret`
+或 `?token=my-secret` 传入。面板打开时带一次 `?token=my-secret` 即可，令牌会存在 `sessionStorage`。
+面板 HTML 与 JS/CSS 静态资源不校验令牌（浏览器无法给 `<script>`/`<link>` 加头），但缺令牌时接口全 401，页面只会是空的。
 
 ## 可选环境变量
 
@@ -228,15 +275,32 @@ npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.
 | `PROXY_DATA_DIR` | 本地数据目录 | `./.proxira` |
 | `PROXY_PREFIX` | 代理请求前缀 | `/proxira` |
 | `PROXY_PREFIX_ENABLED` | 关闭代理请求前缀 | 未设置 |
-| `PROXY_BODY_LIMIT` | 兼容保留（当前版本不再截断展示，实际不生效） | - |
+| `PROXY_HOST` | 监听地址 | `127.0.0.1` |
+| `PROXY_UPSTREAM_TIMEOUT_MS` | 上游请求超时（毫秒），超时返回 504 | `30000` |
+| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
+| `PROXY_PERSIST_DEBOUNCE_MS` | 落盘防抖间隔（毫秒） | `500` |
 | `PROXY_HISTORY_LIMIT` | 内存历史记录上限 | `1000` |
 | `PROXY_HISTORY_PERSIST_LIMIT` | 持久化历史记录上限 | `200` |
+| `PROXY_HISTORY_PERSIST_BODY_LIMIT` | 落盘时单条正文重新裁剪上限（内存仍保留完整内容） | `65536` |
+| `PROXY_ACCESS_TOKEN` | 内部 API / SSE 的访问令牌，未设置则不做校验 | - |
 | `PROXY_QUERY_LIMIT_MAX` | 记录查询接口最大分页值 | - |
 | `PROXY_SSE_HEARTBEAT_MS` | SSE 心跳间隔（毫秒） | - |
 | `PROXY_DISABLE_BANNER` | 关闭启动 Banner | 未设置 |
 | `PROXY_HTTPS_ENABLED` | 启用 HTTPS 服务模式 | 未设置 |
 | `PROXY_HTTPS_KEY_PATH` | HTTPS 私钥文件路径 | - |
 | `PROXY_HTTPS_CERT_PATH` | HTTPS 证书文件路径 | - |
+
+## 从源码开发
+
+本包是 monorepo 的发布主体，开发命令在**仓库根目录**执行：
+
+```bash
+pnpm install     # 安装依赖
+pnpm dev         # 后端 watch(:3000) + 面板 dev server(:5173)，并行
+pnpm build       # 构建发布产物（dashboard → dashboard-dist → tsc）
+pnpm test        # 运行测试
+pnpm pack        # 生成 tarball 本地验证
+```
 
 ## 注意事项
 
