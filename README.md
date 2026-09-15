@@ -34,6 +34,7 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 - 请求重放：改完参数直接重发上游，并与原响应做逐行差异对比。
 - 敏感信息脱敏：`authorization` / `cookie` / `api_key` 等默认打码，一键切换原文。
 - 可选访问令牌：`--token` 保护内部 API 与 SSE（面板静态资源不受影响）。
+- 统一数据目录：历史与配置存放在用户级目录，与启动端口 / 启动方式 / 工作目录无关，并提供旧数据迁移命令。
 
 > [!NOTE]
 > 代理默认记录完整的请求/响应正文；仅当单个正文超过 `PROXY_MAX_BODY_CAPTURE_BYTES`（默认 2MB）时，记录会截断为前缀并标记 `truncated`，转发给客户端的响应始终完整。
@@ -97,7 +98,7 @@ pnpm run release            # 发版并发布到 npm（注意要带 run）
 npx proxira@latest
 
 # 固定版本使用（便于团队复现）
-npx proxira@0.1.7
+npx proxira@0.1.8
 
 # 全局安装
 npm i -g proxira
