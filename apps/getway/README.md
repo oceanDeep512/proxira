@@ -1,9 +1,16 @@
 # Proxira
 
+[![npm version](https://img.shields.io/npm/v/proxira)](https://www.npmjs.com/package/proxira)
+![node](https://img.shields.io/badge/node-%3E%3D20-339933)
+![license](https://img.shields.io/badge/license-MIT-blue)
+
 > 轻量化实时请求代理工具 —— 让本地开发联调更高效
 
 Proxira 是一个**本地开发联调用的实时请求代理与观测工具**。
 它在本地启动代理端口，将请求转发到真实上游服务，并通过 Web 控制面板实时展示请求、响应、耗时与错误信息。
+
+除了观测，它还能主动制造问题：Mock 桩数据、模拟 5xx、注入延迟、在流式响应中途断开、截断响应体；
+也能把任意一条历史请求改改参数直接重放，并和原响应做逐行差异对比。
 
 ## 项目作用
 
@@ -11,6 +18,15 @@ Proxira 是一个**本地开发联调用的实时请求代理与观测工具**�
 - 在不改业务请求代码的前提下，快速切换真实上游地址
 - 对请求数据进行"可视化追踪"：状态码、耗时、Headers、Body、错误等
 - 支持并行调试多环境（如 dev / test / staging）
+
+## 目录
+
+- [核心能力](#核心能力)
+- [快速开始](#快速开始) · [把请求接进来](#把请求接进来) · [HTTPS 模式](#https-模式快速开始)
+- [可用参数](#可用参数) · [使用示例](#使用示例)
+- [拦截规则](#拦截规则mock--故障注入) · [请求重放与差异对比](#请求重放与差异对比) · [敏感信息脱敏](#敏感信息脱敏) · [访问令牌](#访问令牌可选)
+- [分组级超时](#分组级超时) · [数据存放位置](#数据存放位置) · [可选环境变量](#可选环境变量)
+- [常见问题](#常见问题) · [从源码开发](#从源码开发)
 
 ## 核心能力
 
@@ -42,8 +58,8 @@ Proxira 是一个**本地开发联调用的实时请求代理与观测工具**�
 # 直接运行最新版本（推荐）
 npx proxira@latest
 
-# 固定版本运行（适合团队统一环境）
-npx proxira@0.1.3
+# 固定版本运行（适合团队统一环境，请替换为 npm 上的实际版本）
+npx proxira@0.2.0
 
 # 全局安装
 npm i -g proxira
@@ -66,6 +82,32 @@ proxira
 
 - 代理入口：`http://localhost:3000/proxira`（默认）
 - 管理面板：`http://localhost:3000/_proxira/ui`
+
+### 把请求接进来
+
+代理会把 `<代理入口>/<原路径>` 原样转发到 `<上游>/<原路径>`，所以接入时通常只要改 baseURL：
+
+```bash
+# 原来
+curl https://api.example.com/v1/users
+
+# 接入后：把域名+端口换成代理地址，保留 /proxira 前缀
+curl http://127.0.0.1:3000/proxira/v1/users
+```
+
+```js
+// OpenAI / DeepSeek 这类 SDK，改 baseURL 即可（路径 /v1 保留在后面）
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:3000/proxira/v1",
+  apiKey: process.env.DEEPSEEK_API_KEY,
+});
+```
+
+> [!TIP]
+> 若 SDK 或客户端强制使用 HTTPS，可用 `--https` 启动（配合 `gen-cert` 生成的自签名证书），
+> 或用 `-nx` 关闭前缀后把完整地址指向代理端口。
 
 ## HTTPS 模式快速开始
 
@@ -266,6 +308,18 @@ npx proxira --token my-secret
 或 `?token=my-secret` 传入。面板打开时带一次 `?token=my-secret` 即可，令牌会存在 `sessionStorage`。
 面板 HTML 与 JS/CSS 静态资源不校验令牌（浏览器无法给 `<script>`/`<link>` 加头），但缺令牌时接口全 401，页面只会是空的。
 
+## 数据存放位置
+
+默认写入运行目录下的 `.proxira/`（可用 `--data-dir` 改）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `config.json` | 分组配置、当前激活分组 |
+| `history.json` | 按分组分桶的请求历史 |
+| `rules.json` | 各分组的拦截规则 |
+
+历史是防抖落盘的，进程退出前会强制刷盘；`proxira clear-cache` 可一次性清空配置与历史。
+
 ## 可选环境变量
 
 | 变量名 | 说明 | 默认值 |
@@ -292,6 +346,8 @@ npx proxira --token my-secret
 
 ## 从源码开发
 
+> 以下仅面向参与本仓库开发的场景；作为 npm 包使用不需要看这节。
+
 本包是 monorepo 的发布主体，开发命令在**仓库根目录**执行：
 
 ```bash
@@ -301,6 +357,27 @@ pnpm build       # 构建发布产物（dashboard → dashboard-dist → tsc）
 pnpm test        # 运行测试
 pnpm pack        # 生成 tarball 本地验证
 ```
+
+## 常见问题
+
+**面板打不开 / 白屏**
+若启动时带了 `--token`，面板地址要补一次 `?token=你的令牌`（之后会存在 `sessionStorage`）。
+令牌不对时接口返回 401，页面只能看到空壳。
+
+**请求没出现在面板里**
+- 确认请求带了代理前缀（默认 `/proxira`），或已用 `-nx` 关闭前缀；
+- 确认当前激活分组的上游地址是你以为的那个（面板顶部可切换）；
+- 确认服务监听地址可达（默认只监听 `127.0.0.1`）。
+
+**502 和 504 的区别**
+`502` 是连不上上游或上游提前断开；`504` 是上游在 `PROXY_UPSTREAM_TIMEOUT_MS`（或分组级超时）内没响应。
+
+**流式响应详情里正文是空的**
+SSE / 流式响应不会为了观测而完整缓冲（否则会拖住请求），面板展示的是采样到的内容；
+超过 `PROXY_MAX_BODY_CAPTURE_BYTES` 的记录会截断并标记 `truncated`。
+
+**历史记录太多想翻更早的**
+面板单次加载 500 条，列表底部点「加载更多」可按 offset 继续翻页。
 
 ## 注意事项
 
