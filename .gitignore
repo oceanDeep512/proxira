@@ -23,3 +23,6 @@ apps/getway/dashboard-dist/
 # Editor/OS
 .vscode/
 .DS_Store
+
+# WorkBuddy workspace data
+.workbuddy/

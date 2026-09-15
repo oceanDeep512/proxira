@@ -33,6 +33,7 @@ export const printStartupInfo = (options: {
 
   if (config.disableStartupBanner) {
     console.log(`代理服务已启动：${proxyUrl}`);
+    console.log(`监听地址：${config.host}`);
     console.log(`代理入口：${proxyEntryUrl}`);
     console.log(`代理前缀：${proxyModeLabel}`);
     console.log(`HTTPS 模式：${httpsModeLabel}`);
@@ -59,6 +60,7 @@ export const printStartupInfo = (options: {
     logo,
     "",
     `${chalk.bold("Proxy")}: ${chalk.cyan(proxyEntryUrl)}`,
+    `${chalk.bold("Host")}: ${chalk.gray(config.host)}`,
     `${chalk.bold("Prefix")}: ${chalk.gray(proxyModeLabel)}`,
     `${chalk.bold("HTTPS")}: ${
       config.httpsEnabled ? chalk.green(httpsModeLabel) : chalk.gray(httpsModeLabel)

@@ -13,6 +13,7 @@ const props = defineProps<{
   modelValue: string;
   options: readonly PickerOption[];
   disabled?: boolean;
+  compact?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -136,17 +137,19 @@ onBeforeUnmount(() => {
     <button
       ref="triggerRef"
       class="filter-trigger"
-      :class="{ disabled: isDisabled }"
+      :class="{ disabled: isDisabled, compact }"
       type="button"
       :aria-expanded="open"
       aria-haspopup="listbox"
+      :aria-label="label"
+      :title="compact ? `${label}: ${activeOption?.label ?? ''}` : undefined"
       :disabled="isDisabled"
       @click="toggle"
     >
       <span class="filter-trigger-main">
-        <span class="filter-prefix">{{ label }}</span>
+        <span v-if="!compact" class="filter-prefix">{{ label }}</span>
         <span class="filter-value">{{ activeOption?.label ?? "暂无选项" }}</span>
-        <span class="filter-hint">{{ activeOption?.hint ?? "请选择筛选项" }}</span>
+        <span v-if="!compact" class="filter-hint">{{ activeOption?.hint ?? "请选择筛选项" }}</span>
       </span>
       <span class="filter-arrow" :class="{ open }" aria-hidden="true">
         <svg viewBox="0 0 20 20">
@@ -218,6 +221,30 @@ onBeforeUnmount(() => {
 .filter-trigger:hover {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-soft));
+}
+
+.filter-trigger.compact {
+  min-height: 30px;
+  padding: 4px 26px 4px 9px;
+}
+
+.filter-trigger.compact .filter-trigger-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-trigger.compact .filter-value {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-trigger.compact .filter-arrow {
+  width: 13px;
+  height: 13px;
+  right: 7px;
 }
 
 .filter-trigger.disabled {

@@ -1,6 +1,6 @@
 {
   "name": "proxira",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "轻量化实时请求代理工具，支持本地转发与 Web 面板实时查看请求/响应详情。",
   "type": "module",
   "bin": "dist/cli.js",
@@ -21,15 +21,31 @@
     "request-inspector",
     "debug-tool"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oceanDeep512/proxira.git"
+  },
+  "homepage": "https://github.com/oceanDeep512/proxira#readme",
+  "bugs": {
+    "url": "https://github.com/oceanDeep512/proxira/issues"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "prepare:ui": "node ./scripts/sync-dashboard-dist.mjs",
-    "build:pkg": "pnpm --filter @proxira/dashboard build && pnpm run prepare:ui && pnpm run build",
-    "pack:pkg": "pnpm run build:pkg && npm pack",
+    "sync:ui": "node ./scripts/sync-dashboard-dist.mjs",
+    "build:pkg": "pnpm --filter @proxira/dashboard build && pnpm run sync:ui && pnpm run build",
+    "pack:pkg": "pnpm run build:pkg && pnpm pack --pack-destination ../../",
     "start": "node dist/index.js",
     "start:cli": "node dist/cli.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "version:minor": "npm version minor --no-git-tag-version",
+    "version:major": "npm version major --no-git-tag-version",
+    "publish:pkg": "pnpm publish --access public --no-git-checks",
+    "prepublishOnly": "pnpm run build:pkg"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.13",

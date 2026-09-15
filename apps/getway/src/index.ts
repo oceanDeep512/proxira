@@ -1,7 +1,7 @@
 import { serve, getRequestListener } from "@hono/node-server";
 import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
-import { createServer as createNetServer, type Server } from "node:net";
+import type { Server } from "node:net";
 import { createInterface } from "node:readline";
 import chalk from "chalk";
 import { createApp } from "./app/create-app.js";
@@ -12,12 +12,27 @@ import { DashboardAssets } from "./dashboard/assets.js";
 import { ProxyService } from "./proxy/service.js";
 import { createNodeFileSystem } from "./shared/node-file-system.js";
 
+type RuntimeConfig = ReturnType<typeof loadRuntimeConfig>;
+type App = ReturnType<typeof createApp>;
+
 const getRandomPort = (): number => {
   // 使用 3000-50000 范围内的随机端口
   return 3000 + Math.floor(Math.random() * 47000);
 };
 
 const askForPort = async (defaultPort: number): Promise<number | null> => {
+  // No stdin to read from (Docker, CI, background job): asking would hang the
+  // process forever, so fall back to an OS assigned port instead.
+  if (!process.stdin.isTTY) {
+    console.log("");
+    console.log(
+      chalk.yellow(`端口 ${chalk.bold(defaultPort)} 已被占用，且当前环境不支持交互输入`),
+    );
+    console.log(chalk.gray("已自动改用系统分配端口，启动后会打印实际端口。"));
+    console.log("");
+    return 0;
+  }
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -96,77 +111,113 @@ const askForPort = async (defaultPort: number): Promise<number | null> => {
 };
 
 const tryStartServer = (
-  config: ReturnType<typeof loadRuntimeConfig>,
-  app: ReturnType<typeof createApp>,
+  config: RuntimeConfig,
+  app: App,
   port: number,
   onListening: (port: number) => void,
 ): Promise<{ server: Server; port: number }> => {
   return new Promise((resolve, reject) => {
-    let server: Server;
+    let settled = false;
 
-    const onError = (error: NodeJS.ErrnoException) => {
-      if ("code" in error && error.code === "EADDRINUSE") {
-        reject(error);
-      } else {
-        reject(error);
+    // Before the first successful listen an error means "could not bind";
+    // afterwards it is a runtime error that should be reported, not swallowed.
+    const handleError = (error: NodeJS.ErrnoException): void => {
+      if (settled) {
+        console.error(chalk.red(`[proxira] 服务运行出错：${error.message}`));
+        return;
       }
+      settled = true;
+      reject(error);
+    };
+
+    const settle = (server: Server, actualPort: number): void => {
+      if (settled) return;
+      settled = true;
+      onListening(actualPort);
+      resolve({ server, port: actualPort });
     };
 
     if (config.httpsEnabled) {
       if (!config.httpsKeyPath || !config.httpsCertPath) {
-        throw new Error(
-          "HTTPS mode requires both PROXY_HTTPS_KEY_PATH and PROXY_HTTPS_CERT_PATH environment variables.",
+        reject(
+          new Error(
+            "HTTPS 模式需要同时提供证书与私钥，请检查 --https-key / --https-cert。",
+          ),
         );
+        return;
       }
 
-      const listener = getRequestListener(app.fetch);
-      server = createHttpsServer(
-        {
-          key: readFileSync(config.httpsKeyPath),
-          cert: readFileSync(config.httpsCertPath),
-        },
-        listener,
+      let key: Buffer;
+      let cert: Buffer;
+      try {
+        key = readFileSync(config.httpsKeyPath);
+        cert = readFileSync(config.httpsCertPath);
+      } catch (error) {
+        reject(
+          new Error(
+            `读取 HTTPS 证书失败：${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
+        return;
+      }
+
+      const server = createHttpsServer(
+        { key, cert },
+        getRequestListener(app.fetch),
       );
-
-      server.once("error", onError);
-      server.listen(port, "0.0.0.0", () => {
-        server.removeListener("error", onError);
+      // Attach before listen so EADDRINUSE rejects instead of crashing as an
+      // unhandled 'error' event.
+      server.on("error", handleError);
+      server.listen(port, config.host, () => {
         const address = server.address();
-        const actualPort =
-          typeof address === "object" && address ? address.port : port;
-        onListening(actualPort);
-        resolve({ server, port: actualPort });
+        settle(
+          server,
+          typeof address === "object" && address ? address.port : port,
+        );
       });
-    } else {
-      // 对于 HTTP，先尝试用原生 net.Server 检查端口是否被占用
-      const testServer = createNetServer();
-
-      testServer.once("error", (error: NodeJS.ErrnoException) => {
-        if (error.code === "EADDRINUSE") {
-          reject(error);
-        } else {
-          reject(error);
-        }
-      });
-
-      testServer.listen(port, () => {
-        testServer.close(() => {
-          // 端口可用，现在用 @hono/node-server 启动
-          server = serve(
-            {
-              fetch: app.fetch,
-              port,
-              hostname: "0.0.0.0",
-            },
-            (info) => {
-              onListening(info.port);
-              resolve({ server, port: info.port });
-            },
-          );
-        });
-      });
+      return;
     }
+
+    let server: Server;
+    server = serve(
+      {
+        fetch: app.fetch,
+        port,
+        hostname: config.host,
+      },
+      (info) => {
+        settle(server, info.port);
+      },
+    );
+    server.on("error", handleError);
   });
+};
+
+const registerShutdownHooks = (
+  runtime: RuntimeStore,
+  server: Server,
+): void => {
+  let shuttingDown = false;
+
+  const shutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    // Debounced writes must land before the process goes away.
+    void runtime
+      .flushPersist()
+      .catch(() => undefined)
+      .finally(() => {
+        server.close(() => {
+          process.exit(0);
+        });
+        // Do not hang forever if a keep-alive connection refuses to close.
+        setTimeout(() => process.exit(0), 1_000).unref();
+      });
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 };
 
 const bootstrap = async (): Promise<void> => {
@@ -231,7 +282,8 @@ const bootstrap = async (): Promise<void> => {
 
   while (attempts < maxAttempts) {
     try {
-      await tryStartServer(config, app, currentPort, onListening);
+      const started = await tryStartServer(config, app, currentPort, onListening);
+      registerShutdownHooks(runtime, started.server);
       return;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
@@ -241,7 +293,6 @@ const bootstrap = async (): Promise<void> => {
         const newPort = await askForPort(currentPort);
         if (newPort === null) {
           console.log(chalk.gray("已退出"));
-          process.exit(0);
           return;
         }
         currentPort = newPort;
@@ -251,8 +302,14 @@ const bootstrap = async (): Promise<void> => {
     }
   }
 
-  console.error(chalk.red(`尝试了 ${maxAttempts} 次仍无法启动服务器，请手动指定端口`));
-  process.exit(1);
+  throw new Error(
+    `尝试了 ${maxAttempts} 次仍无法启动服务器，请使用 -p/--port 手动指定端口。`,
+  );
 };
 
-void bootstrap();
+bootstrap().catch((error: unknown) => {
+  console.error(
+    chalk.red(`[proxira] ${error instanceof Error ? error.message : String(error)}`),
+  );
+  process.exit(1);
+});

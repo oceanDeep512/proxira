@@ -7,6 +7,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
 import { PROXIRA_LOGO_LINES } from "./logo.js";
+import {
+  detectOS,
+  getInstallCommand,
+  getInstallGuide,
+  validateCertDays,
+  validateCommonName,
+} from "./cli-utils.js";
 
 type CliFlags = {
   mode: "serve" | "clear-cache" | "gen-cert";
@@ -17,6 +24,7 @@ type CliFlags = {
   port?: string;
   target?: string;
   dataDir?: string;
+  host?: string;
   prefix?: string;
   https: boolean;
   httpsKey?: string;
@@ -26,8 +34,6 @@ type CliFlags = {
   certDays?: string;
   yes: boolean;
 };
-
-type OSType = "macos" | "windows" | "linux" | "unknown";
 
 const CLI_VERSION = (() => {
   try {
@@ -40,14 +46,6 @@ const CLI_VERSION = (() => {
     return "0.0.0";
   }
 })();
-
-const detectOS = (): OSType => {
-  const platform = process.platform;
-  if (platform === "darwin") return "macos";
-  if (platform === "win32") return "windows";
-  if (platform === "linux") return "linux";
-  return "unknown";
-};
 
 const checkOpenSSL = (): boolean => {
   try {
@@ -97,29 +95,13 @@ const checkApt = (): boolean => {
   }
 };
 
-const getInstallCommand = (os: OSType): string | null => {
-  switch (os) {
-    case "macos":
-      if (checkHomebrew()) {
-        return "brew install openssl";
-      }
-      return null;
-    case "windows":
-      if (checkChocolatey()) {
-        return "choco install openssl";
-      }
-      return null;
-    case "linux":
-      if (checkApt()) {
-        return "sudo apt-get update && sudo apt-get install -y openssl";
-      }
-      return null;
-    default:
-      return null;
-  }
-};
-
 const askConfirmation = async (message: string): Promise<boolean> => {
+  // process.stdin.setRawMode does not exist outside a TTY and would throw.
+  if (!process.stdin.isTTY) {
+    console.log(chalk.gray("非交互环境，已自动确认继续执行。"));
+    return true;
+  }
+
   console.log(chalk.yellow(message));
   console.log(chalk.gray("请按 Enter 继续，或 Ctrl+C 取消..."));
 
@@ -166,6 +148,7 @@ const printHelp = (): void => {
     `  -p, --port <port>          ${chalk.gray("代理服务端口")} ${chalk.dim("(默认: 3000)")}`,
     `  -t, --target <url>         ${chalk.gray("上游服务地址")} ${chalk.dim("(默认: http://localhost:8080)")}`,
     `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: ./.proxira)")}`,
+    `      --host <address>       ${chalk.gray("监听地址")} ${chalk.dim("(默认: 127.0.0.1)")}`,
     "",
     `${chalk.bold("代理选项")}`,
     `  -x, --prefix <path>        ${chalk.gray("自定义代理前缀")} ${chalk.dim("(默认: /proxira)")}`,
@@ -363,6 +346,17 @@ const parseFlags = (argv: string[]): CliFlags => {
       flags.dataDir = token.slice("--data-dir=".length);
       continue;
     }
+    if (token === "--host") {
+      ensureServeOnly(token);
+      flags.host = readNext(index, token);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--host=")) {
+      ensureServeOnly("--host");
+      flags.host = token.slice("--host=".length);
+      continue;
+    }
 
     if (flags.mode === "gen-cert") {
       if (token === "-o" || token === "--output-dir") {
@@ -424,14 +418,9 @@ const generateCertificate = async (
   const outputDir = resolve(
     outputDirRaw?.trim() || join(process.cwd(), ".proxira", "certs"),
   );
-  const commonName = commonNameRaw?.trim() || "localhost";
-  const days = daysRaw ? Number(daysRaw) : 365;
-
-  if (!Number.isFinite(days) || days <= 0) {
-    throw new Error("证书有效期天数必须是正整数");
-  }
-
-  const os = detectOS();
+  const commonName = validateCommonName(commonNameRaw);
+  const days = validateCertDays(daysRaw);
+  const os = detectOS(process.platform);
   const hasOpenSSL = checkOpenSSL();
 
   console.log(
@@ -468,34 +457,13 @@ const generateCertificate = async (
     console.log(chalk.yellow("⚠️  检测到 OpenSSL 未安装"));
     console.log("");
 
-    const installCommand = getInstallCommand(os);
-    const installGuide = {
-      macos: [
-        "方式一（推荐）：使用 Homebrew 安装",
-        "  brew install openssl",
-        "",
-        "方式二：从官网下载安装",
-        "  访问 https://www.openssl.org/ 下载并安装",
-      ],
-      windows: [
-        "方式一（推荐）：使用 Chocolatey 安装",
-        "  choco install openssl",
-        "",
-        "方式二：从官网下载安装",
-        "  访问 https://slproweb.com/products/Win32OpenSSL.html 下载并安装",
-        "  安装后记得将 OpenSSL 添加到系统 PATH 环境变量",
-      ],
-      linux: [
-        "方式一（推荐）：使用包管理器安装",
-        "  Ubuntu/Debian: sudo apt-get install openssl",
-        "  CentOS/RHEL: sudo yum install openssl",
-        "  Arch Linux: sudo pacman -S openssl",
-        "",
-        "方式二：从源码编译安装",
-        "  访问 https://www.openssl.org/ 下载源码编译",
-      ],
-      unknown: ["请访问 https://www.openssl.org/ 下载并安装 OpenSSL"],
-    }[os];
+    const installCommand = getInstallCommand(
+      os,
+      checkHomebrew(),
+      checkChocolatey(),
+      checkApt(),
+    );
+    const installGuide = getInstallGuide(os);
 
     if (installCommand) {
       console.log(chalk.cyan("📦 推荐一键安装命令："));
@@ -503,8 +471,8 @@ const generateCertificate = async (
       console.log("");
     }
 
-    console.log(chalk.cyan("📖 详细安装指南："));
-    installGuide.forEach((line) => console.log(`  ${line}`));
+    console.log(chalk.cyan(`📖 ${installGuide.title}：`));
+    installGuide.steps.forEach((line) => console.log(`  ${line}`));
     console.log("");
 
     console.log(chalk.gray("安装完成后，请重新运行：proxira gen-cert"));
@@ -655,6 +623,9 @@ const run = async (): Promise<void> => {
     }
     if (flags.dataDir) {
       process.env.PROXY_DATA_DIR = flags.dataDir;
+    }
+    if (flags.host) {
+      process.env.PROXY_HOST = flags.host;
     }
     if (flags.noPrefix) {
       process.env.PROXY_PREFIX_ENABLED = "0";

@@ -84,3 +84,24 @@ describe("collectBody - format detection", () => {
     expect(result.format).toBe("text");
   });
 });
+
+describe("collectBody - binary preview", () => {
+  const bodyLimit = 32768;
+
+  it("should keep a UTF-8 preview for binary content types", () => {
+    const bytes = textEncoder.encode('{"error":"upstream failed"}');
+    const result = collectBody(bytes, "application/octet-stream", bodyLimit);
+    expect(result.isBinary).toBe(true);
+    expect(result.text).toBe('{"error":"upstream failed"}');
+    expect(result.truncated).toBe(false);
+  });
+
+  it("should truncate the binary preview at maxCaptureBytes", () => {
+    const bytes = textEncoder.encode("a".repeat(100));
+    const result = collectBody(bytes, "application/octet-stream", 10);
+    expect(result.isBinary).toBe(true);
+    expect(result.text).toBe("a".repeat(10));
+    expect(result.truncated).toBe(true);
+    expect(result.size).toBe(100);
+  });
+});

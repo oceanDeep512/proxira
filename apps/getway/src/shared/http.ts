@@ -39,7 +39,20 @@ const TEXTUAL_MIME_TYPES = new Set([
   "text/yaml",
 ]);
 
+const STREAMING_MIME_TYPES = new Set([
+  "text/event-stream",
+  "multipart/x-mixed-replace",
+]);
+
 const textDecoder = new TextDecoder();
+
+export const isStreamingContentType = (contentType: string | null): boolean => {
+  if (!contentType) {
+    return false;
+  }
+  const mimeType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return STREAMING_MIME_TYPES.has(mimeType);
+};
 
 const detectBodyFormat = (
   bytes: Uint8Array,
@@ -172,7 +185,7 @@ export const collectQuery = (url: URL): ProxyQueryParams => {
 export const collectBody = (
   bytes: Uint8Array,
   contentType: string | null,
-  _bodyLimit: number,
+  maxCaptureBytes: number,
 ): ProxyPayloadBody => {
   if (bytes.length === 0) {
     return {
@@ -187,20 +200,27 @@ export const collectBody = (
   const isBinary = !isTextualContentType(contentType);
   const format = detectBodyFormat(bytes, contentType, isBinary);
 
+  const captured =
+    bytes.length > maxCaptureBytes ? bytes.slice(0, maxCaptureBytes) : bytes;
+
   if (isBinary) {
+    // Binary payloads cannot be parsed, but the raw bytes are still the only
+    // forensic trace of a failed request (e.g. an SSE stream that dies with an
+    // opaque error body). Keep a lossy UTF-8 preview so users can at least see
+    // what the upstream actually returned.
     return {
-      text: null,
+      text: textDecoder.decode(captured),
       size: bytes.length,
-      truncated: false,
+      truncated: captured.length < bytes.length,
       isBinary: true,
       format,
     };
   }
 
   return {
-    text: textDecoder.decode(bytes),
+    text: textDecoder.decode(captured),
     size: bytes.length,
-    truncated: false,
+    truncated: captured.length < bytes.length,
     isBinary: false,
     format,
   };

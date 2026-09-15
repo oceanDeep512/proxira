@@ -6,12 +6,30 @@ import type { FileSystemAdapter } from "../app/types.js";
 const INTERNAL_ROUTE_PREFIX = "/_proxira";
 const DEFAULT_PROXY_PREFIX = "/proxira";
 
+const DEFAULT_HOST = "127.0.0.1";
+
 const normalizePositiveInteger = (
   raw: string | undefined,
   fallback: number,
 ): number => {
   const parsed = Number(raw ?? fallback);
   return Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : fallback;
+};
+
+const normalizePort = (raw: string | undefined): number => {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return 3000;
+  }
+
+  const parsed = Number(trimmed);
+  // 0 is meaningful: let the OS assign a free port (useful in scripts / CI).
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+    throw new Error(
+      `PORT must be an integer between 0 and 65535 (0 = auto assign), received "${trimmed}".`,
+    );
+  }
+  return parsed;
 };
 
 const normalizeProxyPrefix = (value: string): string | null => {
@@ -75,9 +93,20 @@ export const loadRuntimeConfig = (
     env.PROXY_REQUEST_CONTENT_LENGTH_LIMIT,
     10 * 1024 * 1024,
   );
-  const responseBufferLimit = normalizePositiveInteger(
-    env.PROXY_RESPONSE_BUFFER_LIMIT,
-    10 * 1024 * 1024,
+  // Safety valve against unbounded buffering. Normal API payloads are captured
+  // in full; bodies above this are stored as a prefix with `truncated: true`
+  // and are still forwarded downstream without clipping.
+  const maxBodyCaptureBytes = normalizePositiveInteger(
+    env.PROXY_MAX_BODY_CAPTURE_BYTES,
+    2 * 1024 * 1024,
+  );
+  const upstreamTimeoutMs = normalizePositiveInteger(
+    env.PROXY_UPSTREAM_TIMEOUT_MS,
+    30_000,
+  );
+  const persistDebounceMs = normalizePositiveInteger(
+    env.PROXY_PERSIST_DEBOUNCE_MS,
+    500,
   );
   const proxyPrefixEnabled = env.PROXY_PREFIX_ENABLED !== "0";
   const proxyPrefix = proxyPrefixEnabled
@@ -95,14 +124,14 @@ export const loadRuntimeConfig = (
   return {
     internalRoutePrefix: INTERNAL_ROUTE_PREFIX,
     defaultProxyPrefix: DEFAULT_PROXY_PREFIX,
-    serverPort: Number(env.PORT ?? 3000),
-    // Kept for backward compatibility. Body collection no longer truncates payload text.
-    bodyLimit: normalizePositiveInteger(env.PROXY_BODY_LIMIT, 256 * 1024),
+    host: env.PROXY_HOST?.trim() || DEFAULT_HOST,
+    serverPort: normalizePort(env.PORT),
+    maxBodyCaptureBytes,
+    upstreamTimeoutMs,
+    persistDebounceMs,
     maxQueryLimit: normalizePositiveInteger(env.PROXY_QUERY_LIMIT_MAX, 500),
     sseHeartbeatMs: normalizePositiveInteger(env.PROXY_SSE_HEARTBEAT_MS, 15_000),
     requestContentLengthLimit,
-    // Kept for backward compatibility. Response capture no longer truncates by buffer size.
-    responseBufferLimit,
     historyLimit,
     historyPersistLimit,
     effectiveHistoryPersistLimit,

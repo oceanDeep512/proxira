@@ -1,6 +1,7 @@
 import type {
   ProxyConfig,
   ProxyGroup,
+  ProxyPayloadBody,
   ProxyRecordDetailResponse,
   ProxyRecordsExportResponse,
   ProxyRecordsResponse,
@@ -25,6 +26,8 @@ type SseClient = {
   heartbeatTimer: ReturnType<typeof setInterval>;
 };
 
+type PersistKind = "config" | "history";
+
 type HistoryFilePayload = Record<string, ProxyTrafficRecord[]>;
 
 const encoder = new TextEncoder();
@@ -35,6 +38,8 @@ export class RuntimeStore {
   private readonly historyByGroup = new Map<string, ProxyTrafficRecord[]>();
   private readonly sseClients = new Map<string, SseClient>();
   private persistQueue = Promise.resolve();
+  private readonly pendingPersist = new Map<PersistKind, () => Promise<void>>();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(deps: RuntimeDeps) {
     this.deps = deps;
@@ -402,12 +407,13 @@ export class RuntimeStore {
       throw new AppError(404, "groupId not found.");
     }
 
+    const items = filterRecords(this.ensureGroupHistory(group.id), query);
     return {
       exportedAt: new Date(this.deps.now()).toISOString(),
       groupId: group.id,
       groupName: normalizeGroupName(group.name, 1),
-      total: filterRecords(this.ensureGroupHistory(group.id), query).length,
-      items: filterRecords(this.ensureGroupHistory(group.id), query),
+      total: items.length,
+      items,
     };
   }
 
@@ -506,6 +512,28 @@ export class RuntimeStore {
       }
     }
 
+    this.saveHistory();
+  }
+
+  // Streaming responses are recorded with a null body first (the client stream
+  // must start immediately) and patched once background sampling finishes.
+  updateProxyRecordBody(
+    groupId: string,
+    recordId: string,
+    responseBody: ProxyPayloadBody,
+  ): void {
+    const groupHistory = this.historyByGroup.get(groupId);
+    if (!groupHistory) {
+      return;
+    }
+    const index = groupHistory.findIndex((record) => record.id === recordId);
+    const existing = index === -1 ? undefined : groupHistory[index];
+    if (!existing) {
+      return;
+    }
+    const updated: ProxyTrafficRecord = { ...existing, responseBody };
+    groupHistory[index] = updated;
+    this.broadcastEvent({ type: "record", groupId, record: updated });
     this.saveHistory();
   }
 
@@ -678,13 +706,40 @@ export class RuntimeStore {
     }
   }
 
-  private enqueuePersist(task: () => Promise<void>): void {
-    this.persistQueue = this.persistQueue.then(task).catch((error) => {
-      this.deps.logger.error(
-        "[persist]",
-        error instanceof Error ? error.message : error,
-      );
-    });
+  private enqueuePersist(kind: PersistKind, task: () => Promise<void>): void {
+    // Latest state wins: the task reads live data when it finally runs, so
+    // bursts of requests collapse into one write instead of one write each.
+    this.pendingPersist.set(kind, task);
+    if (this.persistTimer !== null) {
+      return;
+    }
+
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.flushPersist();
+    }, this.deps.config.persistDebounceMs);
+  }
+
+  async flushPersist(): Promise<void> {
+    if (this.persistTimer !== null) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    if (this.pendingPersist.size === 0) {
+      return;
+    }
+
+    const tasks = [...this.pendingPersist.values()];
+    this.pendingPersist.clear();
+    for (const task of tasks) {
+      this.persistQueue = this.persistQueue.then(task).catch((error) => {
+        this.deps.logger.error(
+          "[persist]",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
+    await this.persistQueue;
   }
 
   private serializeHistory(): HistoryFilePayload {
@@ -699,7 +754,7 @@ export class RuntimeStore {
   }
 
   private saveConfig(): void {
-    this.enqueuePersist(async () => {
+    this.enqueuePersist("config", async () => {
       await saveJsonFile(
         this.deps.fs,
         this.deps.config.configFile,
@@ -709,7 +764,7 @@ export class RuntimeStore {
   }
 
   private saveHistory(): void {
-    this.enqueuePersist(async () => {
+    this.enqueuePersist("history", async () => {
       await saveJsonFile(
         this.deps.fs,
         this.deps.config.historyFile,

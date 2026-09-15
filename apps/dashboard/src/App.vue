@@ -1,198 +1,163 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import JsonPretty from "vue-json-pretty";
 import SimpleBar from "simplebar-vue";
 import hljs from "highlight.js";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import markdown from "highlight.js/lib/languages/markdown";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
-import Papa from "papaparse";
-import YAML from "js-yaml";
-import { XMLParser } from "fast-xml-parser";
-import xmlFormat from "xml-formatter";
 import "highlight.js/styles/github.css";
-
-// Register languages
-hljs.registerLanguage("xml", xml);
-hljs.registerLanguage("yaml", yaml);
-hljs.registerLanguage("markdown", markdown);
-
-// Refs for code blocks to apply highlighting
-const requestBodyCodeRef = ref<HTMLElement>();
-const responseBodyCodeRef = ref<HTMLElement>();
 
 import GroupPicker from "./components/GroupPicker.vue";
 import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import GroupFormModal from "./components/GroupFormModal.vue";
 import ToastMessages from "./components/ToastMessages.vue";
-import type {
-  ProxyConfig,
-  ProxyGroup,
-  ProxyHeaders,
-  ProxyPayloadBody,
-  ProxyRecordsExportResponse,
-  ProxyRecordsResponse,
-  ProxySseEvent,
-  ProxyTrafficRecord,
-} from "@proxira/core";
+import type { ProxyGroup, ProxyHeaders } from "@proxira/core";
+import { useProxira } from "./composables/useProxira.js";
+import { useToasts } from "./composables/useToasts.js";
+import {
+  METHOD_FILTER_OPTIONS,
+  SORT_OPTIONS,
+  STATUS_FILTER_OPTIONS,
+  filterAndSortRecords,
+  isMethodFilter,
+  isSortMode,
+  isStatusFilter,
+  type MethodFilter,
+  type SortMode,
+  type StatusFilter,
+} from "./utils/filters.js";
+import {
+  bodyCodeClass,
+  bodyHasRawSource,
+  bodyModeLabel,
+  bodyUsesCodeBlock,
+  bodyUsesCsvTable,
+  bodyUsesJsonTree,
+  bodyUsesRichPreview,
+  bodyUsesSseEvents,
+  bodyViewToCopyText,
+  parseBody,
+  resolveContentType,
+} from "./utils/body.js";
+import {
+  buildCurlCommand,
+  formatBytes,
+  formatDuration,
+  formatTime,
+  resolveStatusTone,
+  toPrettyJson,
+  type StatusTone,
+} from "./utils/format.js";
 
-const apiBase =
-  (import.meta.env.VITE_PROXY_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
+hljs.registerLanguage("xml", xml);
+hljs.registerLanguage("yaml", yaml);
+hljs.registerLanguage("markdown", markdown);
 
-const records = ref<ProxyTrafficRecord[]>([]);
-const groups = ref<ProxyGroup[]>([]);
-const activeGroupId = ref("");
-const selectedRecordId = ref<string | null>(null);
-const deletingRecordId = ref<string | null>(null);
-const connectionState = ref<"connecting" | "open" | "closed">("connecting");
-const exporting = ref(false);
-const clearingRecords = ref(false);
-const resettingAll = ref(false);
-const groupModalOpen = ref(false);
-const groupModalMode = ref<"create" | "edit">("create");
-const groupModalSubmitting = ref(false);
-const modalGroupName = ref("");
-const modalTargetBaseUrl = ref("");
-const deleteGroupModalOpen = ref(false);
-const deleteGroupSubmitting = ref(false);
-const pendingDeleteGroup = ref<ProxyGroup | null>(null);
-const resetModalOpen = ref(false);
-const toastMessages = ref<Array<{ id: number; text: string; level: "success" | "error" | "info" }>>([]);
+type DetailTab =
+  | "response-body"
+  | "response-headers"
+  | "request-body"
+  | "request-headers"
+  | "query";
 
-let events: EventSource | null = null;
-let toastId = 0;
-const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
-
-type BodyView = {
-  mode:
-    | "empty"
-    | "binary"
-    | "json"
-    | "xml"
-    | "form-urlencoded"
-    | "html"
-    | "yaml"
-    | "text"
-    | "csv"
-    | "markdown";
-  jsonData: unknown | null;
-  text: string;
-  note: string;
-  truncated: boolean;
-  previewHtml: string;
-  csvTable: {
-    headers: string[];
-    rows: string[][];
-    totalRows: number;
-    visibleRows: number;
-  } | null;
-};
+const DETAIL_TABS: Array<{ value: DetailTab; label: string }> = [
+  { value: "response-body", label: "响应 Body" },
+  { value: "response-headers", label: "响应 Headers" },
+  { value: "request-body", label: "请求 Body" },
+  { value: "request-headers", label: "请求 Headers" },
+  { value: "query", label: "Query" },
+];
 
 const BODY_COLLAPSE_THRESHOLD = 4_096;
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  trimValues: false,
-});
 
-marked.setOptions({
-  gfm: true,
-  breaks: true,
-  async: false,
-});
-const METHOD_FILTER_OPTIONS = [
-  { value: "ALL", label: "全部请求", hint: "不过滤 Method" },
-  { value: "GET", label: "GET", hint: "读取类请求" },
-  { value: "POST", label: "POST", hint: "创建类请求" },
-  { value: "PUT", label: "PUT", hint: "覆盖更新" },
-  { value: "PATCH", label: "PATCH", hint: "局部更新" },
-  { value: "DELETE", label: "DELETE", hint: "删除类请求" },
-  { value: "OPTIONS", label: "OPTIONS", hint: "预检与能力探测" },
-  { value: "HEAD", label: "HEAD", hint: "只看响应头" },
-] as const;
-const STATUS_FILTER_OPTIONS = [
-  { value: "ALL", label: "全部状态", hint: "不过滤 Status" },
-  { value: "2xx", label: "2xx 成功", hint: "请求成功" },
-  { value: "3xx", label: "3xx 重定向", hint: "发生跳转" },
-  { value: "4xx", label: "4xx 客户端错误", hint: "请求参数问题" },
-  { value: "5xx", label: "5xx 服务端错误", hint: "上游异常" },
-  { value: "ERROR", label: "ERR 异常", hint: "代理或网络失败" },
-] as const;
-const SORT_OPTIONS = [
-  { value: "time_desc", label: "时间从新到旧", hint: "按请求时间倒序" },
-  { value: "time_asc", label: "时间从旧到新", hint: "按请求时间正序" },
-  { value: "duration_desc", label: "耗时从高到低", hint: "优先查看慢请求" },
-  { value: "duration_asc", label: "耗时从低到高", hint: "优先查看快请求" },
-] as const;
+const {
+  records,
+  groups,
+  activeGroup,
+  currentGroupId,
+  selectedRecordId,
+  connectionState,
+  deletingRecordId,
+  exporting,
+  clearingRecords,
+  resettingAll,
+  groupModalSubmitting,
+  deleteGroupSubmitting,
+  fetchConfig,
+  fetchRecords,
+  connectSse,
+  switchActiveGroup,
+  createGroup,
+  saveActiveGroup,
+  deleteGroup,
+  removeRecord,
+  exportRecords: exportRecordsRequest,
+  clearRecords,
+  resetAll: resetAllRequest,
+} = useProxira();
 
-type MethodFilter = (typeof METHOD_FILTER_OPTIONS)[number]["value"];
-type StatusFilter = (typeof STATUS_FILTER_OPTIONS)[number]["value"];
-type SortMode = (typeof SORT_OPTIONS)[number]["value"];
-type StatusTone = "success" | "redirect" | "client" | "server" | "error" | "pending";
+const { toastMessages, pushToast, dismissToast, clearAllToasts } = useToasts();
+
+const requestBodyCodeRef = ref<HTMLElement>();
+const responseBodyCodeRef = ref<HTMLElement>();
 
 const methodFilter = ref<MethodFilter>("ALL");
 const statusFilter = ref<StatusFilter>("ALL");
 const sortMode = ref<SortMode>("time_desc");
+const searchText = ref("");
+const activeDetailTab = ref<DetailTab>("response-body");
 const requestBodyExpanded = ref(false);
 const responseBodyExpanded = ref(false);
 
-const filteredRecords = computed(() => {
-  let items = records.value.filter((record) => {
-    if (methodFilter.value !== "ALL" && record.method !== methodFilter.value) {
-      return false;
-    }
+const groupModalOpen = ref(false);
+const groupModalMode = ref<"create" | "edit">("create");
+const modalGroupName = ref("");
+const modalTargetBaseUrl = ref("");
+const deleteGroupModalOpen = ref(false);
+const pendingDeleteGroup = ref<ProxyGroup | null>(null);
+const resetModalOpen = ref(false);
 
-    const status = record.responseStatus;
-    if (statusFilter.value === "ALL") {
-      return true;
-    }
-    if (statusFilter.value === "ERROR") {
-      return record.error !== null;
-    }
-    if (status === null) {
-      return false;
-    }
-    if (statusFilter.value === "2xx") {
-      return status >= 200 && status < 300;
-    }
-    if (statusFilter.value === "3xx") {
-      return status >= 300 && status < 400;
-    }
-    if (statusFilter.value === "4xx") {
-      return status >= 400 && status < 500;
-    }
-    return status >= 500 && status < 600;
-  });
-
-  items = [...items];
-  if (sortMode.value === "duration_desc") {
-    items.sort((left, right) => right.durationMs - left.durationMs);
-  } else if (sortMode.value === "duration_asc") {
-    items.sort((left, right) => left.durationMs - right.durationMs);
-  } else if (sortMode.value === "time_asc") {
-    items.sort(
-      (left, right) =>
-        new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime(),
-    );
-  } else {
-    items.sort(
-      (left, right) =>
-        new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-    );
-  }
-  return items;
-});
+const filteredRecords = computed(() =>
+  filterAndSortRecords(records.value, {
+    methodFilter: methodFilter.value,
+    statusFilter: statusFilter.value,
+    sortMode: sortMode.value,
+    searchText: searchText.value,
+  }),
+);
 
 const hasRecords = computed(() => filteredRecords.value.length > 0);
 const emptyRecordsLabel = computed(() => {
   if (records.value.length === 0) {
     return "还没有请求记录。";
   }
+  if (searchText.value.trim()) {
+    return `没有匹配「${searchText.value.trim()}」的记录。`;
+  }
   return "当前筛选条件下没有匹配记录。";
 });
+
+const headerCount = (headers: unknown): number =>
+  headers && typeof headers === "object" ? Object.keys(headers).length : 0;
+
+const headerTabCount = (tab: DetailTab): number => {
+  if (!selectedRecord.value) {
+    return 0;
+  }
+  if (tab === "response-headers") {
+    return headerCount(selectedRecord.value.responseHeaders);
+  }
+  if (tab === "request-headers") {
+    return headerCount(selectedRecord.value.requestHeaders);
+  }
+  if (tab === "response-body" && responseBodyView.value.mode === "sse") {
+    return responseBodyView.value.sseEvents?.length ?? 0;
+  }
+  return 0;
+};
+
 const selectedRecord = computed(() => {
   if (!hasRecords.value) {
     return null;
@@ -208,26 +173,23 @@ const selectedRecord = computed(() => {
   );
 });
 
-const activeGroup = computed(() => {
-  if (!activeGroupId.value) {
-    return groups.value[0] ?? null;
-  }
-  return groups.value.find((group) => group.id === activeGroupId.value) ?? groups.value[0] ?? null;
-});
-
-const currentGroupId = computed(() => activeGroup.value?.id ?? "");
 const connectionLabel = computed(() => {
   if (connectionState.value === "open") return "SSE 已连接";
   if (connectionState.value === "connecting") return "SSE 连接中";
   return "SSE 已断开";
 });
-const modalTitle = computed(() => (groupModalMode.value === "create" ? "新增分组" : "编辑当前分组"));
+
+const modalTitle = computed(() =>
+  groupModalMode.value === "create" ? "新增分组" : "编辑当前分组",
+);
 const modalDesc = computed(() =>
   groupModalMode.value === "create"
     ? "请输入新分组的名称和唯一转发地址。"
     : "修改当前分组的名称与转发地址，地址仍需保持唯一。",
 );
-const modalSubmitText = computed(() => (groupModalMode.value === "create" ? "创建并切换" : "保存分组"));
+const modalSubmitText = computed(() =>
+  groupModalMode.value === "create" ? "创建并切换" : "保存分组",
+);
 const resetConfirmTips = [
   "会删除所有分组配置，仅保留一个默认分组。",
   "会清空全部历史请求记录。",
@@ -249,562 +211,19 @@ const detailStatusTone = computed<StatusTone>(() => {
   return resolveStatusTone(record.responseStatus, record.error);
 });
 
-const normalizeTargetInput = (value: string): string | null => {
-  const source = value.trim();
-  if (!source) {
-    return null;
-  }
+const requestBodyView = computed(() =>
+  parseBody(selectedRecord.value?.requestBody ?? null, selectedRecord.value?.requestHeaders),
+);
+const responseBodyView = computed(() =>
+  parseBody(selectedRecord.value?.responseBody ?? null, selectedRecord.value?.responseHeaders),
+);
+const requestBodyContentType = computed(() =>
+  resolveContentType(selectedRecord.value?.requestHeaders),
+);
+const responseBodyContentType = computed(() =>
+  resolveContentType(selectedRecord.value?.responseHeaders),
+);
 
-  try {
-    const parsed = new URL(source);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    return parsed.toString().replace(/\/$/, "");
-  } catch {
-    return null;
-  }
-};
-
-const isTargetDuplicated = (normalizedTarget: string, ignoreGroupId?: string): boolean => {
-  return groups.value.some((group) => {
-    if (ignoreGroupId && group.id === ignoreGroupId) {
-      return false;
-    }
-    return group.targetBaseUrl === normalizedTarget;
-  });
-};
-
-const resolveContentType = (headers: ProxyHeaders | null | undefined): string => {
-  if (!headers) {
-    return "";
-  }
-  for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() !== "content-type") {
-      continue;
-    }
-    const raw = Array.isArray(value) ? value[0] : value;
-    if (!raw) {
-      return "";
-    }
-    return raw.split(";")[0]?.trim().toLowerCase() ?? "";
-  }
-  return "";
-};
-
-const appendBodyNote = (primary: string, secondary: string): string => {
-  if (!primary) return secondary;
-  if (!secondary) return primary;
-  return `${primary} · ${secondary}`;
-};
-
-const safeParseJson = (text: string): unknown | null => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
-// Try to fix truncated JSON by attempting to close unclosed structures
-const tryFixTruncatedJson = (text: string): unknown | null => {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-
-  // Try parsing as-is first
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // Continue to fix attempts
-  }
-
-  // Count unclosed brackets/braces and try to close them
-  const stack: string[] = [];
-  let inString = false;
-  let escapeNext = false;
-
-  for (let i = 0; i < trimmed.length; i++) {
-    const char = trimmed[i];
-
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      escapeNext = true;
-      continue;
-    }
-
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) continue;
-
-    if (char === "{" || char === "[") {
-      stack.push(char);
-    } else if (char === "}" || char === "]") {
-      const expected = char === "}" ? "{" : "[";
-      if (stack.length > 0 && stack[stack.length - 1] === expected) {
-        stack.pop();
-      }
-    }
-  }
-
-  // If we have unclosed structures, try to close them
-  if (stack.length > 0) {
-    let fixed = trimmed;
-
-    // If we're inside a string, close it first
-    if (inString) {
-      fixed += '"';
-    }
-
-    // Close all unclosed structures in reverse order
-    for (let i = stack.length - 1; i >= 0; i--) {
-      fixed += stack[i] === "{" ? "}" : "]";
-    }
-
-    try {
-      return JSON.parse(fixed);
-    } catch {
-      // Fix didn't work, return null
-    }
-  }
-
-  return null;
-};
-
-const fallbackFormatXml = (xmlStr: string): string => {
-  let formatted = "";
-  let indent = 0;
-  const tab = "  ";
-
-  xmlStr = xmlStr.trim().replace(/>\s*</g, "><");
-  const tokens = xmlStr.split(/(<[^>]+>)/g).filter((token) => token.trim());
-
-  for (const token of tokens) {
-    if (token.match(/^<\//)) {
-      indent = Math.max(0, indent - 1);
-      formatted += tab.repeat(indent) + token + "\n";
-    } else if (token.match(/^<[^/][^>]*[^/]>$/) && !token.match(/^<!/)) {
-      formatted += tab.repeat(indent) + token + "\n";
-      indent++;
-    } else if (token.match(/^<[^/][^>]*\/>$/) || token.match(/^</)) {
-      formatted += tab.repeat(indent) + token + "\n";
-    } else {
-      formatted += tab.repeat(indent) + token + "\n";
-    }
-  }
-
-  return formatted.trimEnd();
-};
-
-const formatXmlContent = (source: string): string => {
-  try {
-    return xmlFormat(source, {
-      indentation: "  ",
-      collapseContent: true,
-      lineSeparator: "\n",
-    });
-  } catch {
-    return fallbackFormatXml(source);
-  }
-};
-
-const safeParseXml = (source: string): unknown | null => {
-  try {
-    return xmlParser.parse(source);
-  } catch {
-    return null;
-  }
-};
-
-const safeParseYaml = (source: string): unknown | null => {
-  try {
-    const parsed = YAML.load(source);
-    return parsed === undefined ? null : parsed;
-  } catch {
-    return null;
-  }
-};
-
-const parseFormUrlEncoded = (text: string): Record<string, string | string[]> => {
-  const result: Record<string, string | string[]> = {};
-  const pairs = text.split("&");
-  for (const pair of pairs) {
-    const [rawKey, rawValue] = pair.split("=", 2);
-    if (!rawKey) continue;
-    try {
-      const key = decodeURIComponent(rawKey.replace(/\+/g, " "));
-      const value = rawValue !== undefined ? decodeURIComponent(rawValue.replace(/\+/g, " ")) : "";
-      const existing = result[key];
-      if (existing === undefined) {
-        result[key] = value;
-      } else if (Array.isArray(existing)) {
-        existing.push(value);
-      } else {
-        result[key] = [existing, value];
-      }
-    } catch {
-      // Skip invalid pairs
-    }
-  }
-  return result;
-};
-
-const sanitizeHtml = (source: string): string =>
-  DOMPurify.sanitize(source, {
-    USE_PROFILES: { html: true },
-  });
-
-const detectLikelyCsv = (text: string, contentType: string): boolean => {
-  if (contentType.includes("csv") || contentType.includes("tab-separated-values")) {
-    return true;
-  }
-
-  const lines = text
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) {
-    return false;
-  }
-
-  const sample = lines.slice(0, 5);
-  const delimiter = sample.some((line) => line.includes("\t"))
-    ? "\t"
-    : sample.some((line) => line.includes(",")) ? "," : "";
-  if (!delimiter) {
-    return false;
-  }
-
-  const widths = sample.map((line) => line.split(delimiter).length);
-  const min = Math.min(...widths);
-  const max = Math.max(...widths);
-  return min > 1 && max - min <= 1;
-};
-
-const parseCsvTable = (
-  text: string,
-): {
-  headers: string[];
-  rows: string[][];
-  totalRows: number;
-  visibleRows: number;
-} | null => {
-  const tryParse = (delimiter?: "," | "\t"): string[][] => {
-    const parsed = delimiter
-      ? Papa.parse<string[]>(text, { skipEmptyLines: "greedy", delimiter })
-      : Papa.parse<string[]>(text, { skipEmptyLines: "greedy" });
-    return parsed.data;
-  };
-
-  let rows = tryParse();
-  let maxColumns = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  if (maxColumns <= 1) {
-    rows = tryParse("\t");
-    maxColumns = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  }
-  if (!rows.length || maxColumns <= 1) {
-    return null;
-  }
-
-  const normalizedRows = rows.map((row) =>
-    Array.from({ length: maxColumns }, (_, index) => row[index] ?? ""),
-  );
-  const hasHeader = normalizedRows.length > 1 && normalizedRows[0].some((cell) => cell.trim().length > 0);
-  const headers = hasHeader
-    ? normalizedRows[0]
-    : Array.from({ length: maxColumns }, (_, index) => `Column ${index + 1}`);
-  const tableRows = hasHeader ? normalizedRows.slice(1) : normalizedRows;
-
-  return {
-    headers,
-    rows: tableRows,
-    totalRows: tableRows.length,
-    visibleRows: tableRows.length,
-  };
-};
-
-const detectLikelyMarkdown = (text: string, contentType: string): boolean => {
-  if (contentType.includes("markdown")) {
-    return true;
-  }
-  if (text.length > 500_000) {
-    return false;
-  }
-  return /(^|\n)(#{1,6}\s+\S+|[-*+]\s+\S+|>\s+\S+|\d+\.\s+\S+|```)/.test(text);
-};
-
-const renderMarkdownPreview = (source: string): string => {
-  const rendered = marked.parse(source);
-  const html = typeof rendered === "string" ? rendered : "";
-  return sanitizeHtml(html);
-};
-
-const bodyModeLabels: Record<BodyView["mode"], string> = {
-  empty: "空内容",
-  binary: "二进制",
-  json: "JSON",
-  xml: "XML",
-  "form-urlencoded": "Form URL Encoded",
-  html: "HTML",
-  yaml: "YAML",
-  text: "Text",
-  csv: "CSV",
-  markdown: "Markdown",
-};
-
-const bodyModeLabel = (body: BodyView): string => bodyModeLabels[body.mode];
-
-const bodyUsesJsonTree = (body: BodyView): boolean => body.jsonData !== null;
-
-const bodyUsesCsvTable = (body: BodyView): boolean => body.mode === "csv" && body.csvTable !== null;
-
-const bodyUsesRichPreview = (body: BodyView): boolean =>
-  (body.mode === "html" || body.mode === "markdown") && body.previewHtml.length > 0;
-
-const bodyUsesCodeBlock = (body: BodyView): boolean =>
-  (body.mode === "xml" || body.mode === "yaml" || body.mode === "html") && body.text.length > 0;
-
-const bodyHasRawSource = (body: BodyView): boolean =>
-  (body.mode === "xml" ||
-    body.mode === "yaml" ||
-    body.mode === "form-urlencoded" ||
-    body.mode === "csv") &&
-  body.text.length > 0;
-
-const bodyCodeClass = (body: BodyView): string =>
-  body.mode === "yaml"
-    ? "language-yaml"
-    : body.mode === "markdown"
-      ? "language-markdown"
-      : "language-xml";
-
-const parseBody = (body: ProxyPayloadBody | null, headers: ProxyHeaders | null | undefined): BodyView => {
-  if (!body || body.text === null) {
-    if (body?.isBinary) {
-      return {
-        mode: "binary",
-        jsonData: null,
-        text: "",
-        note: `binary body (${body.size} bytes)`,
-        truncated: false,
-        previewHtml: "",
-        csvTable: null,
-      };
-    }
-
-    return {
-      mode: "empty",
-      jsonData: null,
-      text: "",
-      note: "(empty)",
-      truncated: false,
-      previewHtml: "",
-      csvTable: null,
-    };
-  }
-
-  const contentType = resolveContentType(headers);
-  const truncatedNote = body.truncated ? `已截断，原始 ${formatBytes(body.size)}` : "";
-  const trimmedText = body.text.trimStart();
-  const lowerTrimmed = trimmedText.toLowerCase();
-  const looksLikeHtml =
-    lowerTrimmed.startsWith("<!doctype html") ||
-    lowerTrimmed.includes("<html") ||
-    lowerTrimmed.includes("<head") ||
-    lowerTrimmed.includes("<body");
-  const looksLikeXml = trimmedText.startsWith("<?xml") || (trimmedText.startsWith("<") && !looksLikeHtml);
-  const looksLikeYaml = trimmedText.startsWith("---");
-
-  // Prefer the format detected by backend
-  switch (body.format) {
-    case "json": {
-      let jsonData = safeParseJson(body.text);
-      if (jsonData === null && body.truncated) {
-        jsonData = tryFixTruncatedJson(body.text);
-      }
-      if (jsonData !== null) {
-        return {
-          mode: "json",
-          jsonData,
-          text: "",
-          note: truncatedNote,
-          truncated: body.truncated,
-          previewHtml: "",
-          csvTable: null,
-        };
-      }
-      break;
-    }
-    case "form-urlencoded": {
-      const parsed = parseFormUrlEncoded(body.text);
-      if (Object.keys(parsed).length > 0) {
-        return {
-          mode: "form-urlencoded",
-          jsonData: parsed,
-          text: body.text,
-          note: truncatedNote,
-          truncated: body.truncated,
-          previewHtml: "",
-          csvTable: null,
-        };
-      }
-      break;
-    }
-    case "xml": {
-      const parsed = safeParseXml(body.text);
-      return {
-        mode: "xml",
-        jsonData: parsed,
-        text: formatXmlContent(body.text),
-        note: appendBodyNote(parsed ? "已结构化展示 XML" : "", truncatedNote),
-        truncated: body.truncated,
-        previewHtml: "",
-        csvTable: null,
-      };
-    }
-    case "html":
-      return {
-        mode: "html",
-        jsonData: null,
-        text: formatXmlContent(body.text),
-        note: appendBodyNote("已渲染 HTML 预览", truncatedNote),
-        truncated: body.truncated,
-        previewHtml: sanitizeHtml(body.text),
-        csvTable: null,
-      };
-    case "yaml": {
-      const parsed = safeParseYaml(body.text);
-      return {
-        mode: "yaml",
-        jsonData: parsed,
-        text: body.text,
-        note: appendBodyNote(parsed ? "已结构化展示 YAML" : "", truncatedNote),
-        truncated: body.truncated,
-        previewHtml: "",
-        csvTable: null,
-      };
-    }
-    case "text":
-    case "binary":
-    default:
-      break;
-  }
-
-  let jsonData = safeParseJson(body.text);
-  if (jsonData === null && body.truncated) {
-    jsonData = tryFixTruncatedJson(body.text);
-  }
-  if (jsonData !== null) {
-    return {
-      mode: "json",
-      jsonData,
-      text: "",
-      note: appendBodyNote("按内容识别为 JSON", truncatedNote),
-      truncated: body.truncated,
-      previewHtml: "",
-      csvTable: null,
-    };
-  }
-
-  if (contentType.includes("x-www-form-urlencoded")) {
-    const parsed = parseFormUrlEncoded(body.text);
-    if (Object.keys(parsed).length > 0) {
-      return {
-        mode: "form-urlencoded",
-        jsonData: parsed,
-        text: body.text,
-        note: appendBodyNote("按 Content-Type 解析 Form URL Encoded", truncatedNote),
-        truncated: body.truncated,
-        previewHtml: "",
-        csvTable: null,
-      };
-    }
-  }
-
-  if (contentType.includes("xml") || looksLikeXml) {
-    const parsed = safeParseXml(body.text);
-    return {
-      mode: "xml",
-      jsonData: parsed,
-      text: formatXmlContent(body.text),
-      note: appendBodyNote(parsed ? "按内容识别为 XML（结构化）" : "按内容识别为 XML", truncatedNote),
-      truncated: body.truncated,
-      previewHtml: "",
-      csvTable: null,
-    };
-  }
-
-  if (contentType.includes("yaml") || contentType.includes("yml") || looksLikeYaml) {
-    const parsed = safeParseYaml(body.text);
-    return {
-      mode: "yaml",
-      jsonData: parsed,
-      text: body.text,
-      note: appendBodyNote(parsed ? "按内容识别为 YAML（结构化）" : "按内容识别为 YAML", truncatedNote),
-      truncated: body.truncated,
-      previewHtml: "",
-      csvTable: null,
-    };
-  }
-
-  if (contentType.includes("html") || looksLikeHtml) {
-    return {
-      mode: "html",
-      jsonData: null,
-      text: formatXmlContent(body.text),
-      note: appendBodyNote("按内容识别为 HTML", truncatedNote),
-      truncated: body.truncated,
-      previewHtml: sanitizeHtml(body.text),
-      csvTable: null,
-    };
-  }
-
-  if (detectLikelyCsv(body.text, contentType)) {
-    const table = parseCsvTable(body.text);
-    if (table) {
-      return {
-        mode: "csv",
-        jsonData: null,
-        text: body.text,
-        note: appendBodyNote("按内容识别为 CSV，已表格展示", truncatedNote),
-        truncated: body.truncated,
-        previewHtml: "",
-        csvTable: table,
-      };
-    }
-  }
-
-  if (detectLikelyMarkdown(body.text, contentType)) {
-    return {
-      mode: "markdown",
-      jsonData: null,
-      text: body.text,
-      note: appendBodyNote("按内容识别为 Markdown，已渲染预览", truncatedNote),
-      truncated: body.truncated,
-      previewHtml: renderMarkdownPreview(body.text),
-      csvTable: null,
-    };
-  }
-
-  return {
-    mode: "text",
-    jsonData: null,
-    text: body.text,
-    note: truncatedNote,
-    truncated: body.truncated,
-    previewHtml: "",
-    csvTable: null,
-  };
-};
-
-// Apply highlighting to code blocks
 const applyHighlighting = () => {
   nextTick(() => {
     if (requestBodyCodeRef.value) {
@@ -816,20 +235,21 @@ const applyHighlighting = () => {
   });
 };
 
-// Watch for record changes and apply highlighting
 watch(selectedRecordId, () => {
   applyHighlighting();
 });
 
-// Watch for expand/collapse changes
 watch([requestBodyExpanded, responseBodyExpanded], () => {
   applyHighlighting();
 });
 
-// Also apply highlighting after mount
-onMounted(() => {
-  applyHighlighting();
-});
+watch(
+  () => selectedRecord.value?.id ?? null,
+  () => {
+    requestBodyExpanded.value = false;
+    responseBodyExpanded.value = false;
+  },
+);
 
 const requestBodyCollapsible = computed(() => {
   const body = selectedRecord.value?.requestBody ?? null;
@@ -847,135 +267,33 @@ const responseBodyCollapsible = computed(() => {
   return responseBodyView.value.mode !== "empty" && responseBodyView.value.mode !== "binary";
 });
 
-const requestBodyCollapsed = computed(() => requestBodyCollapsible.value && !requestBodyExpanded.value);
+const requestBodyCollapsed = computed(
+  () => requestBodyCollapsible.value && !requestBodyExpanded.value,
+);
 const responseBodyCollapsed = computed(
   () => responseBodyCollapsible.value && !responseBodyExpanded.value,
 );
 
-const formatTime = (iso: string): string => {
-  const date = new Date(iso);
-  return date.toLocaleTimeString();
-};
-
-const formatDuration = (durationMs: number): string => `${durationMs} ms`;
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1_024) return `${bytes} B`;
-  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
-  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`;
-};
-
-const toPrettyJson = (value: unknown): string => JSON.stringify(value, null, 2);
-
-const bodyViewToCopyText = (body: BodyView): string => {
-  if (body.mode === "json" || body.mode === "form-urlencoded") {
-    return toPrettyJson(body.jsonData ?? {});
+const copyText = async (label: string, text: string): Promise<void> => {
+  if (!text) {
+    pushToast(`${label} 为空`, "info");
+    return;
   }
-  if (
-    body.mode === "text" ||
-    body.mode === "xml" ||
-    body.mode === "html" ||
-    body.mode === "yaml" ||
-    body.mode === "csv" ||
-    body.mode === "markdown"
-  ) {
-    return body.text;
-  }
-  return body.note;
-};
 
-const shellEscape = (text: string): string => `'${text.replace(/'/g, "'\\''")}'`;
-
-const appendHeaderArgs = (parts: string[], headers: ProxyHeaders): void => {
-  for (const [key, value] of Object.entries(headers)) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        parts.push("-H", shellEscape(`${key}: ${item}`));
-      }
-      continue;
-    }
-    parts.push("-H", shellEscape(`${key}: ${value}`));
+  try {
+    await navigator.clipboard.writeText(text);
+    pushToast(`已复制 ${label}`, "success");
+  } catch {
+    pushToast(`复制 ${label} 失败，请检查浏览器权限`, "error");
   }
-};
-
-const buildCurlCommand = (record: ProxyTrafficRecord): string => {
-  const commandParts = ["curl", "-X", record.method];
-  appendHeaderArgs(commandParts, record.requestHeaders);
-  if (
-    record.method !== "GET" &&
-    record.method !== "HEAD" &&
-    record.requestBody.text &&
-    record.requestBody.text.length > 0
-  ) {
-    commandParts.push("--data-raw", shellEscape(record.requestBody.text));
-  }
-  commandParts.push(shellEscape(record.upstreamUrl));
-  return commandParts.join(" ");
-};
-
-const normalizeExportPayload = (
-  raw: unknown,
-  fallback: { groupId: string; groupName: string },
-): ProxyRecordsExportResponse => {
-  const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const exportedAtRaw = typeof source.exportedAt === "string" ? source.exportedAt.trim() : "";
-  const exportedAt =
-    exportedAtRaw.length > 0 && !Number.isNaN(Date.parse(exportedAtRaw))
-      ? exportedAtRaw
-      : new Date().toISOString();
-  const groupId =
-    typeof source.groupId === "string" && source.groupId.trim().length > 0
-      ? source.groupId.trim()
-      : fallback.groupId;
-  const groupName =
-    typeof source.groupName === "string" && source.groupName.trim().length > 0
-      ? source.groupName.trim()
-      : fallback.groupName;
-  const items = Array.isArray(source.items) ? (source.items as ProxyTrafficRecord[]) : [];
-  const totalRaw = typeof source.total === "number" ? source.total : Number.NaN;
-  const total = Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : items.length;
-
-  return {
-    exportedAt,
-    groupId,
-    groupName,
-    total,
-    items,
-  };
-};
-
-const resolveStatusTone = (status: number | null, error: string | null): StatusTone => {
-  if (error || status === null) {
-    return "error";
-  }
-  if (status >= 200 && status < 300) {
-    return "success";
-  }
-  if (status >= 300 && status < 400) {
-    return "redirect";
-  }
-  if (status >= 400 && status < 500) {
-    return "client";
-  }
-  if (status >= 500) {
-    return "server";
-  }
-  return "pending";
 };
 
 const resetFilters = (): void => {
   methodFilter.value = "ALL";
   statusFilter.value = "ALL";
   sortMode.value = "time_desc";
+  searchText.value = "";
 };
-
-const isMethodFilter = (value: string): value is MethodFilter =>
-  METHOD_FILTER_OPTIONS.some((option) => option.value === value);
-
-const isStatusFilter = (value: string): value is StatusFilter =>
-  STATUS_FILTER_OPTIONS.some((option) => option.value === value);
-
-const isSortMode = (value: string): value is SortMode =>
-  SORT_OPTIONS.some((option) => option.value === value);
 
 const updateMethodFilter = (value: string): void => {
   if (isMethodFilter(value)) {
@@ -995,308 +313,12 @@ const updateSortMode = (value: string): void => {
   }
 };
 
-const withGroupQuery = (path: string): string => {
-  const groupId = currentGroupId.value;
-  if (!groupId) {
-    return `${apiBase}${path}`;
-  }
-  const separator = path.includes("?") ? "&" : "?";
-  return `${apiBase}${path}${separator}groupId=${encodeURIComponent(groupId)}`;
-};
-
-const dismissToast = (id: number): void => {
-  const timer = toastTimers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    toastTimers.delete(id);
-  }
-  toastMessages.value = toastMessages.value.filter((item) => item.id !== id);
-};
-
-const pushToast = (text: string, level: "success" | "error" | "info" = "info"): void => {
-  const id = ++toastId;
-  toastMessages.value = [...toastMessages.value, { id, text, level }];
-  const timer = setTimeout(() => {
-    dismissToast(id);
-  }, 2800);
-  toastTimers.set(id, timer);
-};
-
-const extractErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  try {
-    const payload = (await response.json()) as { message?: string };
-    if (payload?.message) {
-      return payload.message;
-    }
-  } catch {
-    // Ignore JSON parsing errors.
-  }
-  return fallback;
-};
-
-const copyText = async (label: string, text: string): Promise<void> => {
-  if (!text) {
-    pushToast(`${label} 为空`, "info");
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(text);
-    pushToast(`已复制 ${label}`, "success");
-  } catch {
-    pushToast(`复制 ${label} 失败，请检查浏览器权限`, "error");
-  }
-};
-
-const syncConfig = (config: ProxyConfig): void => {
-  groups.value = config.groups;
-  const matchedGroup =
-    config.groups.find((group) => group.id === config.activeGroupId) ?? config.groups[0] ?? null;
-  activeGroupId.value = matchedGroup?.id ?? "";
-};
-
-const pushRecord = (record: ProxyTrafficRecord): void => {
-  records.value.unshift(record);
-  if (!selectedRecordId.value) {
-    selectedRecordId.value = record.id;
-  }
-};
-
-const removeRecordLocal = (recordId: string): void => {
-  const currentIndex = records.value.findIndex((record) => record.id === recordId);
-  if (currentIndex === -1) {
-    return;
-  }
-
-  records.value.splice(currentIndex, 1);
-  if (selectedRecordId.value === recordId) {
-    selectedRecordId.value = null;
-  }
-};
-
-const applySseEvent = (event: ProxySseEvent): void => {
-  if (event.type === "snapshot" || event.type === "config") {
-    const previousGroupId = currentGroupId.value;
-    syncConfig(event.config);
-    const nextGroupId = currentGroupId.value;
-    if (previousGroupId !== nextGroupId) {
-      void fetchRecords().catch((error) => {
-        pushToast(error instanceof Error ? error.message : "加载历史记录失败", "error");
-      });
-    }
-    return;
-  }
-
-  if (event.type === "record") {
-    if (event.groupId !== currentGroupId.value) {
-      return;
-    }
-    pushRecord(event.record);
-    return;
-  }
-
-  if (event.type === "record_deleted") {
-    if (event.groupId !== currentGroupId.value) {
-      return;
-    }
-    removeRecordLocal(event.id);
-    return;
-  }
-
-  if (event.type === "records_cleared") {
-    if (event.groupId !== currentGroupId.value) {
-      return;
-    }
-    records.value = [];
-    selectedRecordId.value = null;
-  }
-};
-
-const fetchConfig = async (): Promise<void> => {
-  const response = await fetch(`${apiBase}/_proxira/api/config`);
-  if (!response.ok) {
-    throw new Error("加载配置失败");
-  }
-
-  const config = (await response.json()) as ProxyConfig;
-  syncConfig(config);
-};
-
-const fetchRecords = async (): Promise<void> => {
-  if (!currentGroupId.value) {
-    records.value = [];
-    selectedRecordId.value = null;
-    return;
-  }
-
-  const response = await fetch(withGroupQuery("/_proxira/api/records?limit=500"));
-  if (!response.ok) {
-    throw new Error("加载历史记录失败");
-  }
-
-  const payload = (await response.json()) as ProxyRecordsResponse;
-  records.value = payload.items;
-  if (payload.items.length === 0) {
-    selectedRecordId.value = null;
-    return;
-  }
-
-  const currentStillExists = selectedRecordId.value
-    ? payload.items.some((item) => item.id === selectedRecordId.value)
-    : false;
-  if (!currentStillExists) {
-    selectedRecordId.value = payload.items[0].id;
-  }
-};
-
-const connectSse = (): void => {
-  events?.close();
-  connectionState.value = "connecting";
-
-  events = new EventSource(`${apiBase}/_proxira/api/events`);
-  events.onopen = () => {
-    connectionState.value = "open";
-  };
-  events.onerror = () => {
-    connectionState.value = "closed";
-  };
-  events.onmessage = (rawEvent) => {
-    try {
-      const parsed = JSON.parse(rawEvent.data) as ProxySseEvent;
-      applySseEvent(parsed);
-    } catch {
-      // Ignore malformed events.
-    }
-  };
-};
-
-const switchActiveGroup = async (nextGroupId: string): Promise<void> => {
-  if (!nextGroupId || nextGroupId === activeGroupId.value) {
-    return;
-  }
-
-  try {
-    const response = await fetch(`${apiBase}/_proxira/api/config`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ activeGroupId: nextGroupId }),
-    });
-    if (!response.ok) {
-      throw new Error("切换分组失败");
-    }
-
-    const config = (await response.json()) as ProxyConfig;
-    syncConfig(config);
-    await fetchRecords();
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "切换分组失败", "error");
-  }
-};
-
 const onGroupSelect = (nextGroupId: string): void => {
   void switchActiveGroup(nextGroupId);
 };
 
-const createGroup = async (groupNameRaw: string, targetBaseUrlRaw: string): Promise<void> => {
-  const nextGroupName = groupNameRaw.trim();
-  if (!nextGroupName) {
-    pushToast("分组名称为必填项", "error");
-    return;
-  }
-
-  const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
-  if (!normalizedTarget) {
-    pushToast("分组地址为必填项，且必须是 http/https URL", "error");
-    return;
-  }
-
-  if (isTargetDuplicated(normalizedTarget)) {
-    pushToast("分组地址不能与已有分组重复", "error");
-    return;
-  }
-
-  groupModalSubmitting.value = true;
-  try {
-    const response = await fetch(`${apiBase}/_proxira/api/groups`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: nextGroupName,
-        targetBaseUrl: normalizedTarget,
-        switchToNew: true,
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(await extractErrorMessage(response, "创建分组失败，请检查地址格式"));
-    }
-
-    const payload = (await response.json()) as { config: ProxyConfig };
-    syncConfig(payload.config);
-    await fetchRecords();
-    groupModalOpen.value = false;
-    pushToast("分组已创建并切换", "success");
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "创建分组失败", "error");
-  } finally {
-    groupModalSubmitting.value = false;
-  }
-};
-
-const saveActiveGroup = async (groupNameRaw: string, targetBaseUrlRaw: string): Promise<void> => {
-  if (!currentGroupId.value) {
-    pushToast("当前没有可用分组", "error");
-    return;
-  }
-
-  const groupName = groupNameRaw.trim();
-  if (!groupName) {
-    pushToast("分组名称为必填项", "error");
-    return;
-  }
-
-  const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
-  if (!normalizedTarget) {
-    pushToast("分组地址必须是有效的 http/https URL", "error");
-    return;
-  }
-
-  if (isTargetDuplicated(normalizedTarget, currentGroupId.value)) {
-    pushToast("分组地址不能与其他分组重复", "error");
-    return;
-  }
-
-  groupModalSubmitting.value = true;
-
-  try {
-    const response = await fetch(`${apiBase}/_proxira/api/groups/${encodeURIComponent(currentGroupId.value)}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: groupName,
-        targetBaseUrl: normalizedTarget,
-        makeActive: true,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(await extractErrorMessage(response, "保存失败，请检查地址格式。"));
-    }
-
-    const payload = (await response.json()) as { config: ProxyConfig };
-    syncConfig(payload.config);
-    groupModalOpen.value = false;
-    pushToast("分组配置已保存", "success");
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "保存失败", "error");
-  } finally {
-    groupModalSubmitting.value = false;
-  }
+const onSelectRecord = (recordId: string): void => {
+  selectedRecordId.value = recordId;
 };
 
 const openCreateGroupModal = (): void => {
@@ -1326,12 +348,17 @@ const closeGroupModal = (): void => {
   groupModalOpen.value = false;
 };
 
-const submitGroupModal = async (payload: { name: string; targetBaseUrl: string }): Promise<void> => {
-  if (groupModalMode.value === "create") {
-    await createGroup(payload.name, payload.targetBaseUrl);
-    return;
+const submitGroupModal = async (payload: {
+  name: string;
+  targetBaseUrl: string;
+}): Promise<void> => {
+  const succeeded =
+    groupModalMode.value === "create"
+      ? await createGroup(payload.name, payload.targetBaseUrl)
+      : await saveActiveGroup(payload.name, payload.targetBaseUrl);
+  if (succeeded) {
+    groupModalOpen.value = false;
   }
-  await saveActiveGroup(payload.name, payload.targetBaseUrl);
 };
 
 const openDeleteGroupModal = (groupId: string): void => {
@@ -1359,147 +386,18 @@ const confirmDeleteGroup = async (): Promise<void> => {
     return;
   }
 
-  deleteGroupSubmitting.value = true;
-  try {
-    const response = await fetch(`${apiBase}/_proxira/api/groups/${encodeURIComponent(targetGroup.id)}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error(await extractErrorMessage(response, "删除分组失败"));
-    }
-
-    const payload = (await response.json()) as {
-      clearedRecords: number;
-      config: ProxyConfig;
-    };
-    syncConfig(payload.config);
-    await fetchRecords();
-    pushToast(`已删除分组「${targetGroup.name}」，清除 ${payload.clearedRecords} 条数据`, "success");
-    closeDeleteGroupModal();
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "删除分组失败", "error");
-  } finally {
-    deleteGroupSubmitting.value = false;
+  const succeeded = await deleteGroup(targetGroup);
+  if (succeeded) {
+    deleteGroupModalOpen.value = false;
+    pendingDeleteGroup.value = null;
   }
 };
 
-const onSelectRecord = (recordId: string): void => {
-  selectedRecordId.value = recordId;
-};
-
-const removeRecord = async (recordId: string): Promise<void> => {
-  if (!currentGroupId.value) {
-    return;
-  }
-
-  deletingRecordId.value = recordId;
-  try {
-    const response = await fetch(withGroupQuery(`/_proxira/api/records/${recordId}`), {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error("删除失败");
-    }
-    removeRecordLocal(recordId);
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "删除失败", "error");
-  } finally {
-    deletingRecordId.value = null;
-  }
-};
-
-const exportRecords = async (): Promise<void> => {
-  if (!currentGroupId.value) {
-    pushToast("当前没有可导出的分组", "error");
-    return;
-  }
-
-  exporting.value = true;
-
-  try {
-    const query = new URLSearchParams();
-    if (methodFilter.value !== "ALL") {
-      query.set("method", methodFilter.value);
-    }
-    if (statusFilter.value === "ERROR") {
-      query.set("status", "error");
-    } else if (statusFilter.value !== "ALL") {
-      query.set("status", statusFilter.value);
-    }
-    const queryText = query.toString();
-    const path = queryText
-      ? `/_proxira/api/records/export?${queryText}`
-      : "/_proxira/api/records/export";
-    const response = await fetch(withGroupQuery(path));
-    if (!response.ok) {
-      throw new Error("导出失败");
-    }
-
-    const fallbackGroupName = activeGroup.value?.name?.trim() || "group";
-    const responseText = await response.text();
-    let rawPayload: unknown = {};
-    if (responseText.trim().length > 0) {
-      try {
-        rawPayload = JSON.parse(responseText) as unknown;
-      } catch {
-        rawPayload = {};
-      }
-    }
-    const payload = normalizeExportPayload(rawPayload, {
-      groupId: currentGroupId.value,
-      groupName: fallbackGroupName,
-    });
-
-    const jsonText = toPrettyJson(payload);
-    const blob = new Blob([jsonText], { type: "application/json; charset=utf-8" });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
-    const groupToken =
-      payload.groupName.replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") ||
-      "group";
-    link.href = objectUrl;
-    link.download = `proxira-${groupToken}-records-${fileToken}.json`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
-    if (payload.total === 0) {
-      pushToast("导出成功，当前筛选条件下无记录（空文件）", "info");
-    } else {
-      pushToast(`导出成功，共 ${payload.total} 条`, "success");
-    }
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "导出失败", "error");
-  } finally {
-    exporting.value = false;
-  }
-};
-
-const clearRecords = async (): Promise<void> => {
-  if (!currentGroupId.value) {
-    pushToast("当前没有可清除的分组", "error");
-    return;
-  }
-
-  clearingRecords.value = true;
-  try {
-    const response = await fetch(withGroupQuery("/_proxira/api/records"), {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error("清除历史记录失败");
-    }
-
-    const payload = (await response.json()) as { cleared: number };
-    records.value = [];
-    selectedRecordId.value = null;
-    pushToast(`已清除 ${payload.cleared} 条历史记录`, "success");
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "清除历史记录失败", "error");
-  } finally {
-    clearingRecords.value = false;
-  }
+const exportRecords = (): void => {
+  void exportRecordsRequest({
+    method: methodFilter.value,
+    status: statusFilter.value,
+  });
 };
 
 const openResetModal = (): void => {
@@ -1514,42 +412,11 @@ const closeResetModal = (): void => {
 };
 
 const confirmResetAll = async (): Promise<void> => {
-  resettingAll.value = true;
-  try {
-    const response = await fetch(`${apiBase}/_proxira/api/reset`, {
-      method: "POST",
-    });
-    if (!response.ok) {
-      throw new Error("重置失败");
-    }
-
-    const payload = (await response.json()) as {
-      clearedRecords: number;
-      config: ProxyConfig;
-    };
-    syncConfig(payload.config);
-    await fetchRecords();
-    pushToast(`已重置全部内容，清除 ${payload.clearedRecords} 条历史`, "success");
-    closeResetModal();
-  } catch (error) {
-    pushToast(error instanceof Error ? error.message : "重置失败", "error");
-  } finally {
-    resettingAll.value = false;
+  const succeeded = await resetAllRequest();
+  if (succeeded) {
+    resetModalOpen.value = false;
   }
 };
-
-const requestBodyView = computed(() =>
-  parseBody(selectedRecord.value?.requestBody ?? null, selectedRecord.value?.requestHeaders),
-);
-const responseBodyView = computed(() =>
-  parseBody(selectedRecord.value?.responseBody ?? null, selectedRecord.value?.responseHeaders),
-);
-const requestBodyContentType = computed(() =>
-  resolveContentType(selectedRecord.value?.requestHeaders),
-);
-const responseBodyContentType = computed(() =>
-  resolveContentType(selectedRecord.value?.responseHeaders),
-);
 
 onMounted(async () => {
   try {
@@ -1562,20 +429,8 @@ onMounted(async () => {
   connectSse();
 });
 
-watch(
-  () => selectedRecord.value?.id ?? null,
-  () => {
-    requestBodyExpanded.value = false;
-    responseBodyExpanded.value = false;
-  },
-);
-
 onBeforeUnmount(() => {
-  events?.close();
-  for (const timer of toastTimers.values()) {
-    clearTimeout(timer);
-  }
-  toastTimers.clear();
+  clearAllToasts();
 });
 </script>
 
@@ -1646,7 +501,57 @@ onBeforeUnmount(() => {
                 {{ clearingRecords ? "清除中..." : "清除" }}
               </button>
               <button class="button button-ghost panel-button" :disabled="exporting" @click="exportRecords">
-                {{ exporting ? "导出 JSON" : "导出 JSON" }}
+                {{ exporting ? "导出中..." : "导出 JSON" }}
+              </button>
+            </div>
+          </div>
+
+          <div class="list-tools">
+            <input
+              v-model="searchText"
+              class="list-search"
+              type="search"
+              placeholder="搜索 path…"
+              aria-label="按路径搜索请求"
+            />
+            <div class="list-filter-row">
+              <FilterPicker
+                class="list-filter-item"
+                label="Method"
+                compact
+                :options="METHOD_FILTER_OPTIONS"
+                :model-value="methodFilter"
+                @update:modelValue="updateMethodFilter"
+              />
+              <FilterPicker
+                class="list-filter-item"
+                label="Status"
+                compact
+                :options="STATUS_FILTER_OPTIONS"
+                :model-value="statusFilter"
+                @update:modelValue="updateStatusFilter"
+              />
+              <FilterPicker
+                class="list-filter-item"
+                label="排序"
+                compact
+                :options="SORT_OPTIONS"
+                :model-value="sortMode"
+                @update:modelValue="updateSortMode"
+              />
+              <button
+                class="list-filter-reset round-icon-button"
+                type="button"
+                aria-label="重置筛选"
+                data-tooltip="重置筛选"
+                :disabled="methodFilter === 'ALL' && statusFilter === 'ALL' && sortMode === 'time_desc' && !searchText"
+                @click="resetFilters"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M10 2a8 8 0 1 1-7.6 10.5.9.9 0 1 1 1.7-.5A6.2 6.2 0 1 0 5.7 5.2l1.5 1.5a.9.9 0 1 1-1.3 1.3L2.8 5a.9.9 0 0 1 0-1.3l3.1-3.1a.9.9 0 0 1 1.3 1.3L5.7 3.4A8 8 0 0 1 10 2Z"
+                  />
+                </svg>
               </button>
             </div>
           </div>
@@ -1662,22 +567,21 @@ onBeforeUnmount(() => {
                   @click="onSelectRecord(record.id)"
                 >
                   <div class="record-line">
-                    <span class="method">{{ record.method }}</span>
-                    <div class="record-actions">
-                      <span class="status" :data-tone="resolveStatusTone(record.responseStatus, record.error)">
-                        {{ record.responseStatus ?? "ERR" }}
-                      </span>
-                      <button
-                        class="record-delete"
-                        type="button"
-                        :disabled="deletingRecordId === record.id"
-                        @click.stop="removeRecord(record.id)"
-                      >
-                        {{ deletingRecordId === record.id ? "删除中" : "删除" }}
-                      </button>
-                    </div>
+                    <span class="method" :data-method="record.method">{{ record.method }}</span>
+                    <code class="path" :title="record.path">{{ record.path }}</code>
+                    <span class="status" :data-tone="resolveStatusTone(record.responseStatus, record.error)">
+                      {{ record.responseStatus ?? "ERR" }}
+                    </span>
+                    <button
+                      class="record-delete"
+                      type="button"
+                      aria-label="删除该条记录"
+                      :disabled="deletingRecordId === record.id"
+                      @click.stop="removeRecord(record.id)"
+                    >
+                      {{ deletingRecordId === record.id ? "…" : "✕" }}
+                    </button>
                   </div>
-                  <code class="path">{{ record.path }}</code>
                   <div class="record-line meta">
                     <span class="duration">{{ formatDuration(record.durationMs) }}</span>
                     <span>{{ formatTime(record.timestamp) }}</span>
@@ -1690,50 +594,6 @@ onBeforeUnmount(() => {
       </aside>
 
       <section class="right-column">
-        <section class="action-zone card">
-          <div class="action-zone-head">
-            <h2 class="section-title">工作区</h2>
-          </div>
-          <div class="workspace-tools">
-            <div class="filter-grid">
-              <FilterPicker
-                class="filter-picker-item"
-                label="Method"
-                :options="METHOD_FILTER_OPTIONS"
-                :model-value="methodFilter"
-                @update:modelValue="updateMethodFilter"
-              />
-              <FilterPicker
-                class="filter-picker-item"
-                label="Status"
-                :options="STATUS_FILTER_OPTIONS"
-                :model-value="statusFilter"
-                @update:modelValue="updateStatusFilter"
-              />
-              <FilterPicker
-                class="filter-picker-item"
-                label="排序"
-                :options="SORT_OPTIONS"
-                :model-value="sortMode"
-                @update:modelValue="updateSortMode"
-              />
-            </div>
-            <button
-              class="filter-reset-button round-icon-button"
-              type="button"
-              aria-label="重置筛选"
-              data-tooltip="重置筛选"
-              @click="resetFilters"
-            >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path
-                  d="M10 2a8 8 0 1 1-7.6 10.5.9.9 0 1 1 1.7-.5A6.2 6.2 0 1 0 5.7 5.2l1.5 1.5a.9.9 0 1 1-1.3 1.3L2.8 5a.9.9 0 0 1 0-1.3l3.1-3.1a.9.9 0 0 1 1.3 1.3L5.7 3.4A8 8 0 0 1 10 2Z"
-                />
-              </svg>
-            </button>
-          </div>
-        </section>
-
         <section class="card detail-panel">
           <p v-if="!selectedRecord" class="empty">请选择一条请求记录查看详情。</p>
 
@@ -1766,12 +626,25 @@ onBeforeUnmount(() => {
                 </div>
               </header>
 
-              <div class="detail-split">
-                <SimpleBar class="detail-column-scroll">
-                  <section class="detail-column">
-                    <p class="detail-column-title">请求内容</p>
+              <nav class="detail-tabs" role="tablist" aria-label="请求详情分区">
+                <button
+                  v-for="tab in DETAIL_TABS"
+                  :key="tab.value"
+                  class="detail-tab"
+                  :class="{ active: activeDetailTab === tab.value }"
+                  type="button"
+                  role="tab"
+                  :aria-selected="activeDetailTab === tab.value"
+                  @click="activeDetailTab = tab.value"
+                >
+                  {{ tab.label }}
+                  <span v-if="headerTabCount(tab.value) > 0" class="detail-tab-count">{{ headerTabCount(tab.value) }}</span>
+                </button>
+              </nav>
 
-                  <article class="detail-card">
+              <SimpleBar class="detail-body-scroll">
+                <section class="detail-column">
+                  <article v-if="activeDetailTab === 'query'" class="detail-card">
                     <div class="detail-card-head">
                       <h3>Query Params</h3>
                       <button
@@ -1785,7 +658,7 @@ onBeforeUnmount(() => {
                     <JsonPretty class="json-view" :data="selectedRecord.query" />
                   </article>
 
-                  <article class="detail-card">
+                  <article v-if="activeDetailTab === 'request-headers'" class="detail-card">
                     <div class="detail-card-head">
                       <h3>Request Headers</h3>
                       <button
@@ -1799,7 +672,7 @@ onBeforeUnmount(() => {
                     <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
                   </article>
 
-                  <article class="detail-card">
+                  <article v-if="activeDetailTab === 'request-body'" class="detail-card">
                     <div class="detail-card-head">
                       <div class="detail-card-title">
                         <h3>Request Body</h3>
@@ -1827,6 +700,28 @@ onBeforeUnmount(() => {
                     <pre v-if="requestBodyCollapsed">
                       内容较大（{{ formatBytes(selectedRecord.requestBody.size) }}），已折叠，点击"展开"查看。
                     </pre>
+                    <div
+                      v-else-if="bodyUsesSseEvents(requestBodyView)"
+                      class="sse-events"
+                    >
+                      <article
+                        v-for="(evt, evtIndex) in requestBodyView.sseEvents ?? []"
+                        :key="`sse-req-${evtIndex}`"
+                        class="sse-event"
+                      >
+                        <div class="sse-event-head">
+                          <span class="sse-event-index">{{ evtIndex + 1 }}</span>
+                          <span class="sse-event-name" :class="{ 'is-message': evt.event === 'message' }">{{ evt.event }}</span>
+                          <span v-if="evt.id" class="sse-event-id">id: {{ evt.id }}</span>
+                        </div>
+                        <JsonPretty
+                          v-if="evt.jsonData !== null"
+                          class="json-view"
+                          :data="evt.jsonData as any"
+                        />
+                        <pre v-else class="sse-event-raw">{{ evt.data }}</pre>
+                      </article>
+                    </div>
                     <JsonPretty
                       v-else-if="bodyUsesJsonTree(requestBodyView)"
                       class="json-view"
@@ -1891,14 +786,7 @@ onBeforeUnmount(() => {
                     </p>
                   </article>
 
-                  </section>
-                </SimpleBar>
-
-                <SimpleBar class="detail-column-scroll">
-                  <section class="detail-column">
-                  <p class="detail-column-title">响应内容</p>
-
-                  <article class="detail-card">
+                  <article v-if="activeDetailTab === 'response-headers'" class="detail-card">
                     <div class="detail-card-head">
                       <h3>Response Headers</h3>
                       <button
@@ -1912,7 +800,7 @@ onBeforeUnmount(() => {
                     <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
                   </article>
 
-                  <article class="detail-card">
+                  <article v-if="activeDetailTab === 'response-body'" class="detail-card">
                     <div class="detail-card-head">
                       <div class="detail-card-title">
                         <h3>Response Body</h3>
@@ -1940,6 +828,31 @@ onBeforeUnmount(() => {
                     <pre v-if="responseBodyCollapsed">
                       内容较大（{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}），已折叠，点击"展开"查看。
                     </pre>
+                    <div
+                      v-else-if="bodyUsesSseEvents(responseBodyView)"
+                      class="sse-events"
+                    >
+                      <p v-if="responseBodyView.truncated" class="sub-note sse-truncated-note">
+                        流较长，仅采样了前部分事件，完整内容请用上游日志核对。
+                      </p>
+                      <article
+                        v-for="(evt, evtIndex) in responseBodyView.sseEvents ?? []"
+                        :key="`sse-resp-${evtIndex}`"
+                        class="sse-event"
+                      >
+                        <div class="sse-event-head">
+                          <span class="sse-event-index">{{ evtIndex + 1 }}</span>
+                          <span class="sse-event-name" :class="{ 'is-message': evt.event === 'message' }">{{ evt.event }}</span>
+                          <span v-if="evt.id" class="sse-event-id">id: {{ evt.id }}</span>
+                        </div>
+                        <JsonPretty
+                          v-if="evt.jsonData !== null"
+                          class="json-view"
+                          :data="evt.jsonData as any"
+                        />
+                        <pre v-else class="sse-event-raw">{{ evt.data }}</pre>
+                      </article>
+                    </div>
                     <JsonPretty
                       v-else-if="bodyUsesJsonTree(responseBodyView)"
                       class="json-view"
@@ -2007,7 +920,7 @@ onBeforeUnmount(() => {
                     </p>
                   </article>
 
-                  <article v-if="selectedRecord.error" class="detail-card detail-error">
+                  <article v-if="activeDetailTab === 'response-body' && selectedRecord.error" class="detail-card detail-error">
                     <div class="detail-card-head">
                       <h3>Error</h3>
                       <button
@@ -2020,9 +933,8 @@ onBeforeUnmount(() => {
                     </div>
                     <pre>{{ selectedRecord.error }}</pre>
                   </article>
-                  </section>
-                </SimpleBar>
-              </div>
+                </section>
+              </SimpleBar>
             </div>
           </template>
         </section>

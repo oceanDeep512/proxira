@@ -13,12 +13,14 @@ export type FileSystemAdapter = {
 export type RuntimeConfig = {
   internalRoutePrefix: string;
   defaultProxyPrefix: string;
+  host: string;
   serverPort: number;
-  bodyLimit: number;
+  maxBodyCaptureBytes: number;
+  upstreamTimeoutMs: number;
+  persistDebounceMs: number;
   maxQueryLimit: number;
   sseHeartbeatMs: number;
   requestContentLengthLimit: number;
-  responseBufferLimit: number;
   historyLimit: number;
   historyPersistLimit: number;
   effectiveHistoryPersistLimit: number;
