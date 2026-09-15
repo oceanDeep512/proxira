@@ -2,11 +2,19 @@
 import boxen from "boxen";
 import chalk from "chalk";
 import { readFileSync, existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, cp } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
 import { PROXIRA_LOGO_LINES } from "./logo.js";
+import {
+  describeDataDirSource,
+  findLegacyDataDir,
+  readActiveInstance,
+  resolveDataDir as resolveDataDirFrom,
+  resolveUserDataDir,
+  instanceFilePath,
+} from "./config/data-dir.js";
 import {
   detectOS,
   getInstallCommand,
@@ -16,7 +24,8 @@ import {
 } from "./cli-utils.js";
 
 type CliFlags = {
-  mode: "serve" | "clear-cache" | "gen-cert";
+  mode: "serve" | "clear-cache" | "gen-cert" | "data-dir" | "migrate-data";
+  migrateFrom?: string;
   help: boolean;
   version: boolean;
   noBanner: boolean;
@@ -139,16 +148,18 @@ const printHelp = (): void => {
     "  proxira [command] [options]",
     "",
     `${chalk.bold("命令")}`,
-    `  ${chalk.cyan("serve")}       ${chalk.gray("启动代理服务（默认）")}`,
-    `  ${chalk.cyan("gen-cert")}    ${chalk.gray("生成自签名 HTTPS 证书")}`,
-    `  ${chalk.cyan("clear-cache")} ${chalk.gray("清除本地缓存数据")}`,
+    `  ${chalk.cyan("serve")}          ${chalk.gray("启动代理服务（默认）")}`,
+    `  ${chalk.cyan("gen-cert")}       ${chalk.gray("生成自签名 HTTPS 证书")}`,
+    `  ${chalk.cyan("clear-cache")}    ${chalk.gray("清除数据目录内容")}`,
+    `  ${chalk.cyan("data-dir")}       ${chalk.gray("显示当前数据目录位置")}`,
+    `  ${chalk.cyan("migrate-data")}   ${chalk.gray("迁移旧版工作目录下的 .proxira 数据")}`,
     "",
     `${chalk.bold("选项")}`,
     "",
     `${chalk.bold("服务选项")}`,
     `  -p, --port <port>          ${chalk.gray("代理服务端口")} ${chalk.dim("(默认: 3000)")}`,
     `  -t, --target <url>         ${chalk.gray("上游服务地址")} ${chalk.dim("(默认: http://localhost:8080)")}`,
-    `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: ./.proxira)")}`,
+    `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: 用户级目录，如 ~/Library/Application Support/Proxira)")}`,
     `      --host <address>       ${chalk.gray("监听地址")} ${chalk.dim("(默认: 127.0.0.1)")}`,
     `      --token <token>       ${chalk.gray("面板与 API 访问令牌")} ${chalk.dim("(默认: 不启用)")}`,
     "",
@@ -162,7 +173,7 @@ const printHelp = (): void => {
     `      --https-cert <path>    ${chalk.gray("HTTPS 证书文件路径")}`,
     "",
     `${chalk.bold("gen-cert 选项")}`,
-    `  -o, --output-dir <path>    ${chalk.gray("证书输出目录")} ${chalk.dim("(默认: ./.proxira/certs)")}`,
+    `  -o, --output-dir <path>    ${chalk.gray("证书输出目录")} ${chalk.dim("(默认: <数据目录>/certs)")}`,
     `  -c, --common-name <name>   ${chalk.gray("证书通用名")} ${chalk.dim("(默认: localhost)")}`,
     `      --days <number>        ${chalk.gray("证书有效期天数")} ${chalk.dim("(默认: 365)")}`,
     `  -y, --yes                  ${chalk.gray("跳过确认提示，直接执行")}`,
@@ -225,13 +236,19 @@ const parseFlags = (argv: string[]): CliFlags => {
   } else if (normalizedInput[0] === "gen-cert") {
     flags.mode = "gen-cert";
     normalized = normalizedInput.slice(1);
+  } else if (normalizedInput[0] === "data-dir") {
+    flags.mode = "data-dir";
+    normalized = normalizedInput.slice(1);
+  } else if (normalizedInput[0] === "migrate-data") {
+    flags.mode = "migrate-data";
+    normalized = normalizedInput.slice(1);
   } else {
     flags.mode = "serve";
     normalized = normalizedInput;
   }
 
   const ensureServeOnly = (token: string): void => {
-    if (flags.mode === "clear-cache" || flags.mode === "gen-cert") {
+    if (flags.mode !== "serve") {
       throw new Error(`参数 ${token} 仅可用于启动代理服务`);
     }
   };
@@ -348,6 +365,21 @@ const parseFlags = (argv: string[]): CliFlags => {
       flags.dataDir = token.slice("--data-dir=".length);
       continue;
     }
+    if (token === "--from") {
+      if (flags.mode !== "migrate-data") {
+        throw new Error(`参数 ${token} 仅可用于 migrate-data 子命令`);
+      }
+      flags.migrateFrom = readNext(index, token);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--from=")) {
+      if (flags.mode !== "migrate-data") {
+        throw new Error(`参数 ${token} 仅可用于 migrate-data 子命令`);
+      }
+      flags.migrateFrom = token.slice("--from=".length);
+      continue;
+    }
     if (token === "--host") {
       ensureServeOnly(token);
       flags.host = readNext(index, token);
@@ -411,15 +443,97 @@ const parseFlags = (argv: string[]): CliFlags => {
   return flags;
 };
 
-const resolveDataDir = (dataDirRaw?: string): string => {
-  return resolve(dataDirRaw?.trim() || join(process.cwd(), ".proxira"));
-};
-
 const clearLocalCache = async (dataDirRaw?: string): Promise<void> => {
-  const dataDir = resolveDataDir(dataDirRaw);
+  // Same resolution as the serve mode: a bare `clear-cache` now targets the
+  // per-user data directory instead of whatever the cwd happens to be.
+  const { dataDir } = resolveDataDirFrom({ flag: dataDirRaw });
   await rm(dataDir, { recursive: true, force: true });
   await mkdir(dataDir, { recursive: true });
   console.log(chalk.green(`[proxira] 本地缓存已清除：${dataDir}`));
+};
+
+const DATA_FILES = ["config.json", "history.json", "rules.json"] as const;
+
+const showDataDir = (dataDirRaw?: string): void => {
+  const { dataDir, source } = resolveDataDirFrom({ flag: dataDirRaw });
+  console.log(chalk.bold("数据目录：") + dataDir);
+  console.log(chalk.gray(`来源：${describeDataDirSource(source)}`));
+  console.log("");
+
+  const present = DATA_FILES.filter((file) =>
+    existsSync(join(dataDir, file)),
+  );
+  if (present.length === 0) {
+    console.log(chalk.gray("当前目录还没有数据，启动服务后自动创建。"));
+    return;
+  }
+  console.log(chalk.gray("已存在："));
+  for (const file of present) {
+    console.log(chalk.gray(`  - ${file}`));
+  }
+  console.log("");
+  console.log(
+    chalk.gray("迁移旧数据：") + "proxira migrate-data --from <旧的 .proxira 目录>",
+  );
+};
+
+const migrateData = async (options: {
+  from?: string | undefined;
+  dataDirRaw?: string | undefined;
+}): Promise<void> => {
+  const sourceDir = resolve(
+    options.from?.trim() || join(process.cwd(), ".proxira"),
+  );
+  const { dataDir: targetDir } = resolveDataDirFrom({
+    flag: options.dataDirRaw,
+  });
+
+  if (sourceDir === targetDir) {
+    throw new Error("源目录与目标目录相同，无需迁移。");
+  }
+  if (!existsSync(sourceDir)) {
+    throw new Error(`未找到源目录：${sourceDir}`);
+  }
+
+  const existing = DATA_FILES.filter((file) =>
+    existsSync(join(targetDir, file)),
+  );
+  if (existing.length > 0) {
+    throw new Error(
+      `目标目录已有数据（${existing.join("、")}），为避免覆盖请先手动备份，` +
+        `或用 --data-dir 指定一个空目录。`,
+    );
+  }
+
+  await mkdir(targetDir, { recursive: true });
+
+  const copied: string[] = [];
+  for (const file of [...DATA_FILES, "certs"]) {
+    const from = join(sourceDir, file);
+    if (!existsSync(from)) {
+      continue;
+    }
+    await cp(from, join(targetDir, file), { recursive: true });
+    copied.push(file);
+  }
+
+  if (copied.length === 0) {
+    console.log(chalk.yellow(`[proxira] 源目录中没有可迁移的数据：${sourceDir}`));
+    return;
+  }
+
+  console.log(chalk.green(`[proxira] 迁移完成：`));
+  console.log(chalk.gray(`  源目录：${sourceDir}`));
+  console.log(chalk.gray(`  目标目录：${targetDir}`));
+  for (const file of copied) {
+    console.log(chalk.gray(`  - ${file}`));
+  }
+  console.log("");
+  console.log(
+    chalk.yellow(
+      "源目录已保留，未做删除；确认新目录工作正常后可手动删除旧的 .proxira 目录。",
+    ),
+  );
 };
 
 const generateCertificate = async (
@@ -429,7 +543,7 @@ const generateCertificate = async (
   skipConfirmation: boolean = false,
 ): Promise<{ keyPath: string; certPath: string }> => {
   const outputDir = resolve(
-    outputDirRaw?.trim() || join(process.cwd(), ".proxira", "certs"),
+    outputDirRaw?.trim() || join(resolveUserDataDir(), "certs"),
   );
   const commonName = validateCommonName(commonNameRaw);
   const days = validateCertDays(daysRaw);
@@ -618,6 +732,14 @@ const run = async (): Promise<void> => {
       await clearLocalCache(flags.dataDir);
       return;
     }
+    if (flags.mode === "data-dir") {
+      showDataDir(flags.dataDir);
+      return;
+    }
+    if (flags.mode === "migrate-data") {
+      await migrateData({ from: flags.migrateFrom, dataDirRaw: flags.dataDir });
+      return;
+    }
     if (flags.mode === "gen-cert") {
       await generateCertificate(
         flags.certOutputDir,
@@ -661,9 +783,10 @@ const run = async (): Promise<void> => {
 
       // 如果用户没有指定证书路径，尝试自动检测默认位置
       if (!keyPath || !certPath) {
-        const defaultDataDir = flags.dataDir
-          ? resolve(flags.dataDir)
-          : join(process.cwd(), ".proxira");
+        // Same data directory as everything else, so certs follow the data.
+        const { dataDir: defaultDataDir } = resolveDataDirFrom({
+          flag: flags.dataDir,
+        });
         const defaultCertDir = join(defaultDataDir, "certs");
         const defaultKeyPath = join(defaultCertDir, "key.pem");
         const defaultCertPath = join(defaultCertDir, "cert.pem");
@@ -686,9 +809,7 @@ const run = async (): Promise<void> => {
           console.log(chalk.yellow(`[proxira] 未检测到 HTTPS 证书`));
           console.log("");
 
-          const certOutputDir = flags.dataDir
-            ? join(resolve(flags.dataDir), "certs")
-            : undefined;
+          const certOutputDir = join(defaultDataDir, "certs");
 
           await askConfirmation("是否现在生成自签名证书？");
           console.log("");
@@ -719,6 +840,31 @@ const run = async (): Promise<void> => {
 
       process.env.PROXY_HTTPS_KEY_PATH = keyPath;
       process.env.PROXY_HTTPS_CERT_PATH = certPath;
+    }
+
+    // 启动前的两项检查：老版本遗留数据、同一数据目录上的并发实例。
+    // 版本号手动统一后，数据目录不再随端口/启动方式漂移，这两类问题才可能暴露。
+    {
+      const { dataDir } = resolveDataDirFrom({ flag: flags.dataDir });
+
+      if (!flags.noBanner) {
+        const legacyDir = findLegacyDataDir(process.cwd(), { existsSync });
+        const targetHasData = DATA_FILES.some((file) =>
+          existsSync(join(dataDir, file)),
+        );
+        if (legacyDir && !targetHasData) {
+          console.log(chalk.yellow(`[proxira] 检测到旧版数据目录：${legacyDir}`));
+          console.log(
+            chalk.gray(
+              "  旧版本把数据写在启动目录下的 .proxira；现在统一使用用户级目录。",
+            ),
+          );
+          console.log(
+            chalk.gray(`  如需保留这些历史，执行：proxira migrate-data --from ${legacyDir}`),
+          );
+          console.log("");
+        }
+      }
     }
 
     process.env.PROXY_CLI_MODE = "1";

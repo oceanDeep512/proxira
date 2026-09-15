@@ -1,4 +1,5 @@
 import type { ProxyConfig, ProxyServerStatus } from "@proxira/core";
+import type { DataDirSource } from "../config/data-dir.js";
 
 export type LoggerLike = Pick<Console, "log" | "error">;
 
@@ -27,6 +28,8 @@ export type RuntimeConfig = {
   historyPersistBodyLimitBytes: number;
   disableStartupBanner: boolean;
   dataDir: string;
+  /** How the data directory was picked; shown at startup to make it obvious. */
+  dataDirSource: DataDirSource;
   configFile: string;
   historyFile: string;
   rulesFile: string;

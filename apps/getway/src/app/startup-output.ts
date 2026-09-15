@@ -3,6 +3,7 @@ import chalk from "chalk";
 import type { RuntimeConfig } from "./types.js";
 import { DashboardAssets } from "../dashboard/assets.js";
 import { PROXIRA_LOGO_LINES } from "../logo.js";
+import { describeDataDirSource } from "../config/data-dir.js";
 
 export const printStartupInfo = (options: {
   config: RuntimeConfig;
@@ -38,7 +39,7 @@ export const printStartupInfo = (options: {
     console.log(`代理前缀：${proxyModeLabel}`);
     console.log(`HTTPS 模式：${httpsModeLabel}`);
     console.log(`当前上游地址：${targetBaseUrl}`);
-    console.log(`数据目录：${config.dataDir}`);
+    console.log(`数据目录：${config.dataDir}（${describeDataDirSource(config.dataDirSource)}）`);
     console.log(`历史记录上限：${historyLimit}`);
     console.log(`本地持久化最近条数：${effectiveHistoryPersistLimit}`);
     console.log(`访问令牌：${config.accessToken ? "已启用" : "未启用"}`);
@@ -80,6 +81,9 @@ export const printStartupInfo = (options: {
       config.accessToken ? chalk.green("enabled") : chalk.gray("disabled")
     }`,
     `${chalk.bold("Data Dir")}: ${chalk.gray(config.dataDir)}`,
+    `${chalk.bold("Data Dir Source")}: ${chalk.gray(
+      describeDataDirSource(config.dataDirSource),
+    )}`,
   ].join("\n");
 
   console.log(

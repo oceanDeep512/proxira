@@ -64,6 +64,7 @@ export const createTestConfig = (
     historyPersistBodyLimitBytes: 64 * 1024,
     disableStartupBanner: true,
     dataDir: "/tmp/proxira-test",
+    dataDirSource: "user",
     configFile: "/tmp/proxira-test/config.json",
     historyFile: "/tmp/proxira-test/history.json",
     rulesFile: "/tmp/proxira-test/rules.json",

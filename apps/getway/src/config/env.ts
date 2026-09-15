@@ -2,6 +2,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RuntimeConfig } from "../app/types.js";
 import type { FileSystemAdapter } from "../app/types.js";
+import { resolveDataDir } from "./data-dir.js";
 
 const INTERNAL_ROUTE_PREFIX = "/_proxira";
 const DEFAULT_PROXY_PREFIX = "/proxira";
@@ -126,7 +127,9 @@ export const loadRuntimeConfig = (
     );
   }
 
-  const dataDir = resolve(env.PROXY_DATA_DIR?.trim() || join(process.cwd(), ".proxira"));
+  // Single source of truth: the data directory never depends on the port or
+  // the launch style, only on an explicit override or the per-user default.
+  const { dataDir, source: dataDirSource } = resolveDataDir({ env });
 
   return {
     internalRoutePrefix: INTERNAL_ROUTE_PREFIX,
@@ -145,6 +148,7 @@ export const loadRuntimeConfig = (
     historyPersistBodyLimitBytes,
     disableStartupBanner: env.PROXY_DISABLE_BANNER === "1",
     dataDir,
+    dataDirSource,
     configFile: join(dataDir, "config.json"),
     historyFile: join(dataDir, "history.json"),
     rulesFile: join(dataDir, "rules.json"),

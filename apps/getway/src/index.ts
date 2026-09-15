@@ -3,10 +3,15 @@ import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
 import type { Server } from "node:net";
 import { createInterface } from "node:readline";
+import { rm } from "node:fs/promises";
 import chalk from "chalk";
 import { createApp } from "./app/create-app.js";
 import { RuntimeStore } from "./app/runtime-store.js";
 import { printStartupInfo } from "./app/startup-output.js";
+import {
+  instanceFilePath,
+  readActiveInstance,
+} from "./config/data-dir.js";
 import { loadRuntimeConfig } from "./config/env.js";
 import { DashboardAssets } from "./dashboard/assets.js";
 import { ProxyService } from "./proxy/service.js";
@@ -196,6 +201,7 @@ const tryStartServer = (
 const registerShutdownHooks = (
   runtime: RuntimeStore,
   server: Server,
+  dataDir: string,
 ): void => {
   let shuttingDown = false;
 
@@ -208,11 +214,17 @@ const registerShutdownHooks = (
       .flushPersist()
       .catch(() => undefined)
       .finally(() => {
-        server.close(() => {
-          process.exit(0);
-        });
-        // Do not hang forever if a keep-alive connection refuses to close.
-        setTimeout(() => process.exit(0), 1_000).unref();
+        // A stale instance.json would make the next launch warn about a
+        // concurrent instance that no longer exists.
+        rm(instanceFilePath(dataDir), { force: true })
+          .catch(() => undefined)
+          .finally(() => {
+            server.close(() => {
+              process.exit(0);
+            });
+            // Do not hang forever if a keep-alive connection refuses to close.
+            setTimeout(() => process.exit(0), 1_000).unref();
+          });
       });
   };
 
@@ -246,6 +258,22 @@ const bootstrap = async (): Promise<void> => {
   );
 
   await runtime.hydrate();
+
+  // Shared data directory: warn when another live instance is writing to the
+  // same config/history files instead of silently interleaving writes.
+  const activeInstance = await readActiveInstance(config.dataDir, fs);
+  if (activeInstance) {
+    console.log("");
+    console.log(
+      chalk.yellow(
+        `[proxira] 警告：检测到另一个实例正在运行（PID ${activeInstance.pid}，端口 ${activeInstance.port}），且共用同一数据目录。`,
+      ),
+    );
+    console.log(
+      chalk.gray("  两个实例会互相覆盖配置与历史；如需并行调试，请用 --data-dir 隔离数据目录。"),
+    );
+    console.log("");
+  }
 
   const app = createApp({
     config,
@@ -283,7 +311,25 @@ const bootstrap = async (): Promise<void> => {
   while (attempts < maxAttempts) {
     try {
       const started = await tryStartServer(config, app, currentPort, onListening);
-      registerShutdownHooks(runtime, started.server);
+      // Mark this instance as the live owner of the data directory. Written
+      // after a successful listen so the recorded port is the real one.
+      await fs
+        .mkdir(config.dataDir, { recursive: true })
+        .then(() =>
+          fs.writeTextFile(
+            instanceFilePath(config.dataDir),
+            JSON.stringify(
+              {
+                pid: process.pid,
+                port: started.port,
+                startedAt: new Date().toISOString(),
+              },
+              null,
+              2,
+            ),
+          ),
+        );
+      registerShutdownHooks(runtime, started.server, config.dataDir);
       return;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
