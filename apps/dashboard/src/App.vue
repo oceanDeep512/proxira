@@ -9,11 +9,14 @@ import markdown from "highlight.js/lib/languages/markdown";
 import "highlight.js/styles/github.css";
 
 import GroupPicker from "./components/GroupPicker.vue";
+import RuleManagerModal from "./components/RuleManagerModal.vue";
+import ReplayDialog from "./components/ReplayDialog.vue";
 import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import GroupFormModal from "./components/GroupFormModal.vue";
 import ToastMessages from "./components/ToastMessages.vue";
-import type { ProxyGroup, ProxyHeaders } from "@proxira/core";
+import type { ProxyGroup, ProxyHeaders, ProxyRule } from "@proxira/core";
+import { redactHeaders, redactText } from "./utils/redact.js";
 import { useProxira } from "./composables/useProxira.js";
 import { useToasts } from "./composables/useToasts.js";
 import {
@@ -39,6 +42,7 @@ import {
   bodyUsesSseEvents,
   bodyViewToCopyText,
   parseBody,
+  redactBodyView,
   resolveContentType,
 } from "./utils/body.js";
 import {
@@ -74,6 +78,8 @@ const BODY_COLLAPSE_THRESHOLD = 4_096;
 
 const {
   records,
+  recordsTotal,
+  recordsLoadingMore,
   groups,
   activeGroup,
   currentGroupId,
@@ -85,8 +91,16 @@ const {
   resettingAll,
   groupModalSubmitting,
   deleteGroupSubmitting,
+  rules,
+  replaying,
+  fetchRules,
+  saveRule,
+  removeRule,
+  toggleRule,
+  replayRecord,
   fetchConfig,
   fetchRecords,
+  loadMoreRecords,
   connectSse,
   switchActiveGroup,
   createGroup,
@@ -115,6 +129,7 @@ const groupModalOpen = ref(false);
 const groupModalMode = ref<"create" | "edit">("create");
 const modalGroupName = ref("");
 const modalTargetBaseUrl = ref("");
+const modalUpstreamTimeoutMs = ref<number | null>(null);
 const deleteGroupModalOpen = ref(false);
 const pendingDeleteGroup = ref<ProxyGroup | null>(null);
 const resetModalOpen = ref(false);
@@ -129,6 +144,7 @@ const filteredRecords = computed(() =>
 );
 
 const hasRecords = computed(() => filteredRecords.value.length > 0);
+const hasMoreRecords = computed(() => records.value.length < recordsTotal.value);
 const emptyRecordsLabel = computed(() => {
   if (records.value.length === 0) {
     return "还没有请求记录。";
@@ -184,11 +200,11 @@ const modalTitle = computed(() =>
 );
 const modalDesc = computed(() =>
   groupModalMode.value === "create"
-    ? "请输入新分组的名称和唯一转发地址。"
+    ? "请输入新分组的名称和唯一转发地址。创建后不会自动切换，当前请求仍走现有分组。"
     : "修改当前分组的名称与转发地址，地址仍需保持唯一。",
 );
 const modalSubmitText = computed(() =>
-  groupModalMode.value === "create" ? "创建并切换" : "保存分组",
+  groupModalMode.value === "create" ? "创建分组" : "保存分组",
 );
 const resetConfirmTips = [
   "会删除所有分组配置，仅保留一个默认分组。",
@@ -211,10 +227,10 @@ const detailStatusTone = computed<StatusTone>(() => {
   return resolveStatusTone(record.responseStatus, record.error);
 });
 
-const requestBodyView = computed(() =>
+const rawRequestBodyView = computed(() =>
   parseBody(selectedRecord.value?.requestBody ?? null, selectedRecord.value?.requestHeaders),
 );
-const responseBodyView = computed(() =>
+const rawResponseBodyView = computed(() =>
   parseBody(selectedRecord.value?.responseBody ?? null, selectedRecord.value?.responseHeaders),
 );
 const requestBodyContentType = computed(() =>
@@ -325,6 +341,7 @@ const openCreateGroupModal = (): void => {
   groupModalMode.value = "create";
   modalGroupName.value = "";
   modalTargetBaseUrl.value = "";
+  modalUpstreamTimeoutMs.value = null;
   groupModalOpen.value = true;
 };
 
@@ -338,6 +355,7 @@ const openEditGroupModal = (): void => {
   groupModalMode.value = "edit";
   modalGroupName.value = group.name;
   modalTargetBaseUrl.value = group.targetBaseUrl;
+  modalUpstreamTimeoutMs.value = group.upstreamTimeoutMs ?? null;
   groupModalOpen.value = true;
 };
 
@@ -351,11 +369,16 @@ const closeGroupModal = (): void => {
 const submitGroupModal = async (payload: {
   name: string;
   targetBaseUrl: string;
+  upstreamTimeoutMs: number | null;
 }): Promise<void> => {
   const succeeded =
     groupModalMode.value === "create"
-      ? await createGroup(payload.name, payload.targetBaseUrl)
-      : await saveActiveGroup(payload.name, payload.targetBaseUrl);
+      ? await createGroup(payload.name, payload.targetBaseUrl, payload.upstreamTimeoutMs)
+      : await saveActiveGroup(
+          payload.name,
+          payload.targetBaseUrl,
+          payload.upstreamTimeoutMs,
+        );
   if (succeeded) {
     groupModalOpen.value = false;
   }
@@ -418,10 +441,116 @@ const confirmResetAll = async (): Promise<void> => {
   }
 };
 
+// ---- 拦截规则与重放 ----------------------------------------------------
+const rulesModalOpen = ref(false);
+const replayModalOpen = ref(false);
+const replayDialogRef = ref<InstanceType<typeof ReplayDialog> | null>(null);
+
+const openRulesModal = (): void => {
+  rulesModalOpen.value = true;
+  void fetchRules().catch(() => pushToast("加载规则失败", "error"));
+};
+
+const closeRulesModal = (): void => {
+  rulesModalOpen.value = false;
+};
+
+const onCreateRule = async (payload: Record<string, unknown>): Promise<void> => {
+  await saveRule(payload);
+};
+
+const onUpdateRule = async (payload: {
+  id: string;
+  patch: Record<string, unknown>;
+}): Promise<void> => {
+  await saveRule(payload.patch, payload.id);
+};
+
+const openReplayModal = (): void => {
+  if (!selectedRecord.value) {
+    pushToast("请先选择一条请求记录", "error");
+    return;
+  }
+  replayModalOpen.value = true;
+};
+
+const closeReplayModal = (): void => {
+  replayModalOpen.value = false;
+};
+
+const submitReplay = async (payload: {
+  method: string;
+  url: string;
+  headersText: string;
+  body: string;
+}): Promise<void> => {
+  const headers: Record<string, string> = {};
+  for (const line of payload.headersText.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const separator = trimmed.indexOf(":");
+    if (separator === -1) {
+      continue;
+    }
+    headers[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim();
+  }
+
+  const result = await replayRecord({
+    method: payload.method,
+    url: payload.url,
+    headers,
+    body: payload.body,
+  });
+  if (result) {
+    replayDialogRef.value?.setResult(result);
+  }
+};
+
+// ---- 敏感信息脱敏 ------------------------------------------------------
+const showSensitive = ref(false);
+
+const requestBodyView = computed(() =>
+  showSensitive.value ? rawRequestBodyView.value : redactBodyView(rawRequestBodyView.value),
+);
+const responseBodyView = computed(() =>
+  showSensitive.value ? rawResponseBodyView.value : redactBodyView(rawResponseBodyView.value),
+);
+const displayRequestHeaders = computed<ProxyHeaders>(() =>
+  showSensitive.value
+    ? (selectedRecord.value?.requestHeaders ?? {})
+    : redactHeaders(selectedRecord.value?.requestHeaders ?? {}),
+);
+const curlCommand = computed(() => {
+  const record = selectedRecord.value;
+  if (!record) {
+    return "";
+  }
+  return buildCurlCommand({
+    ...record,
+    requestHeaders: displayRequestHeaders.value,
+    ...(record.requestBody.text
+      ? {
+          requestBody: {
+            ...record.requestBody,
+            text: showSensitive.value ? record.requestBody.text : redactText(record.requestBody.text),
+          },
+        }
+      : {}),
+  });
+});
+const displayResponseHeaders = computed<ProxyHeaders>(() =>
+  showSensitive.value
+    ? (selectedRecord.value?.responseHeaders ?? {})
+    : redactHeaders(selectedRecord.value?.responseHeaders ?? {}),
+);
+
 onMounted(async () => {
   try {
     await fetchConfig();
     await fetchRecords();
+    await fetchRules();
   } catch (error) {
     pushToast(error instanceof Error ? error.message : "初始化失败", "error");
   }
@@ -487,6 +616,28 @@ onBeforeUnmount(() => {
               >
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M14.7 2.8a2.2 2.2 0 0 1 3.1 3.1L8.4 15.4l-3.6.5.5-3.6 9.4-9.5Zm1.8 1.3a.4.4 0 0 0-.6 0l-1 1 1.9 1.9 1-1a.4.4 0 0 0 0-.6l-1.3-1.3ZM13.6 6.4 6.9 13l-.2 1.2 1.2-.2 6.6-6.7-1.9-1.9Z" />
+                </svg>
+              </button>
+              <button
+                class="round-icon-button"
+                type="button"
+                aria-label="拦截规则"
+                data-tooltip="拦截规则（Mock / 故障注入）"
+                @click="openRulesModal"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M3 5.5 10 2l7 3.5v5c0 4.2-2.9 6.6-7 7.5-4.1-.9-7-3.3-7-7.5v-5Zm3.2 4.6 2.4 2.4 4.2-4.6-1.3-1.2-2.9 3.2-1.1-1.1-1.3 1.3Z" />
+                </svg>
+              </button>
+              <button
+                class="round-icon-button"
+                type="button"
+                :aria-label="showSensitive ? '隐藏敏感信息' : '显示敏感信息'"
+                :data-tooltip="showSensitive ? '已显示敏感信息' : '已脱敏显示'"
+                @click="showSensitive = !showSensitive"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 4c4 0 7 2.6 8.3 6-1.3 3.4-4.3 6-8.3 6s-7-2.6-8.3-6C2.3 6.6 5.3 4 9.3 4H10Zm0 2.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0 2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" />
                 </svg>
               </button>
             </div>
@@ -585,11 +736,28 @@ onBeforeUnmount(() => {
                   <div class="record-line meta">
                     <span class="duration">{{ formatDuration(record.durationMs) }}</span>
                     <span>{{ formatTime(record.timestamp) }}</span>
+                    <span v-if="record.source === 'replay'" class="record-tag" title="由重放产生">重放</span>
+                    <span
+                      v-else-if="record.appliedRuleId"
+                      class="record-tag"
+                      data-tone="rule"
+                      title="命中了拦截规则"
+                    >规则</span>
                   </div>
                 </article>
               </li>
             </ul>
           </SimpleBar>
+
+          <button
+            v-if="hasMoreRecords"
+            class="list-load-more"
+            type="button"
+            :disabled="recordsLoadingMore"
+            @click="loadMoreRecords"
+          >
+            {{ recordsLoadingMore ? "加载中..." : `加载更多（已显示 ${records.length} / ${recordsTotal}）` }}
+          </button>
         </aside>
       </aside>
 
@@ -606,6 +774,14 @@ onBeforeUnmount(() => {
                     <button
                       class="mini-button"
                       type="button"
+                      :disabled="replaying"
+                      @click="openReplayModal"
+                    >
+                      {{ replaying ? "重放中..." : "重放请求" }}
+                    </button>
+                    <button
+                      class="mini-button"
+                      type="button"
                       @click="copyText('URL', selectedRecord.upstreamUrl)"
                     >
                       复制 URL
@@ -613,7 +789,7 @@ onBeforeUnmount(() => {
                     <button
                       class="mini-button"
                       type="button"
-                      @click="copyText('cURL', buildCurlCommand(selectedRecord))"
+                      @click="copyText('cURL', curlCommand)"
                     >
                       复制 cURL
                     </button>
@@ -664,12 +840,12 @@ onBeforeUnmount(() => {
                       <button
                         class="mini-button"
                         type="button"
-                        @click="copyText('Request Headers', toPrettyJson(selectedRecord.requestHeaders))"
+                        @click="copyText('Request Headers', toPrettyJson(displayRequestHeaders))"
                       >
                         复制
                       </button>
                     </div>
-                    <JsonPretty class="json-view" :data="selectedRecord.requestHeaders as ProxyHeaders" />
+                    <JsonPretty class="json-view" :data="displayRequestHeaders as ProxyHeaders" />
                   </article>
 
                   <article v-if="activeDetailTab === 'request-body'" class="detail-card">
@@ -792,12 +968,12 @@ onBeforeUnmount(() => {
                       <button
                         class="mini-button"
                         type="button"
-                        @click="copyText('Response Headers', toPrettyJson(selectedRecord.responseHeaders))"
+                        @click="copyText('Response Headers', toPrettyJson(displayResponseHeaders))"
                       >
                         复制
                       </button>
                     </div>
-                    <JsonPretty class="json-view" :data="selectedRecord.responseHeaders as ProxyHeaders" />
+                    <JsonPretty class="json-view" :data="displayResponseHeaders as ProxyHeaders" />
                   </article>
 
                   <article v-if="activeDetailTab === 'response-body'" class="detail-card">
@@ -950,6 +1126,7 @@ onBeforeUnmount(() => {
       :loading="groupModalSubmitting"
       :initial-name="modalGroupName"
       :initial-target-base-url="modalTargetBaseUrl"
+      :initial-upstream-timeout-ms="modalUpstreamTimeoutMs"
       @close="closeGroupModal"
       @submit="submitGroupModal"
     />
@@ -973,6 +1150,25 @@ onBeforeUnmount(() => {
       :danger="true"
       @close="closeResetModal"
       @confirm="confirmResetAll"
+    />
+    <RuleManagerModal
+      :open="rulesModalOpen"
+      :rules="rules"
+      :loading="false"
+      @close="closeRulesModal"
+      @create="onCreateRule"
+      @update="onUpdateRule"
+      @remove="(id: string) => removeRule(id)"
+      @toggle="(rule: ProxyRule) => toggleRule(rule)"
+    />
+    <ReplayDialog
+      ref="replayDialogRef"
+      :open="replayModalOpen"
+      :record="selectedRecord"
+      :loading="replaying"
+      :redact="!showSensitive"
+      @close="closeReplayModal"
+      @submit="submitReplay"
     />
   </main>
 </template>

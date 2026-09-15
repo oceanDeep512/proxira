@@ -65,6 +65,10 @@ export const normalizeRecord = (
         : null,
     durationMs: item.durationMs,
     error: typeof item.error === "string" ? item.error : null,
+    appliedRuleId:
+      typeof item.appliedRuleId === "string" ? item.appliedRuleId : null,
+    // Older history files predate the field; those entries came from the proxy.
+    source: item.source === "replay" ? "replay" : "proxy",
   };
 };
 

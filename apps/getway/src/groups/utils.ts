@@ -16,12 +16,23 @@ export const createGroup = (
   name: string,
   targetBaseUrl: string,
   randomUUID: () => string,
+  upstreamTimeoutMs: number | null = null,
 ): ProxyGroup => {
   return {
     id: randomUUID(),
     name: name.trim(),
     targetBaseUrl,
+    upstreamTimeoutMs: normalizeTimeout(upstreamTimeoutMs),
   };
+};
+
+// A non-positive or non-finite timeout is meaningless: treat it as "no
+// override" so the global default applies.
+export const normalizeTimeout = (value: number | null | undefined): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.floor(value);
 };
 
 export const normalizeGroupName = (

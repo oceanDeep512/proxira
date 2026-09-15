@@ -32,6 +32,7 @@ type CliFlags = {
   certOutputDir?: string;
   certCommonName?: string;
   certDays?: string;
+  accessToken?: string;
   yes: boolean;
 };
 
@@ -149,6 +150,7 @@ const printHelp = (): void => {
     `  -t, --target <url>         ${chalk.gray("上游服务地址")} ${chalk.dim("(默认: http://localhost:8080)")}`,
     `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: ./.proxira)")}`,
     `      --host <address>       ${chalk.gray("监听地址")} ${chalk.dim("(默认: 127.0.0.1)")}`,
+    `      --token <token>       ${chalk.gray("面板与 API 访问令牌")} ${chalk.dim("(默认: 不启用)")}`,
     "",
     `${chalk.bold("代理选项")}`,
     `  -x, --prefix <path>        ${chalk.gray("自定义代理前缀")} ${chalk.dim("(默认: /proxira)")}`,
@@ -355,6 +357,17 @@ const parseFlags = (argv: string[]): CliFlags => {
     if (token.startsWith("--host=")) {
       ensureServeOnly("--host");
       flags.host = token.slice("--host=".length);
+      continue;
+    }
+    if (token === "--token") {
+      ensureServeOnly(token);
+      flags.accessToken = readNext(index, token);
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--token=")) {
+      ensureServeOnly("--token");
+      flags.accessToken = token.slice("--token=".length);
       continue;
     }
 
@@ -626,6 +639,9 @@ const run = async (): Promise<void> => {
     }
     if (flags.host) {
       process.env.PROXY_HOST = flags.host;
+    }
+    if (flags.accessToken) {
+      process.env.PROXY_ACCESS_TOKEN = flags.accessToken;
     }
     if (flags.noPrefix) {
       process.env.PROXY_PREFIX_ENABLED = "0";

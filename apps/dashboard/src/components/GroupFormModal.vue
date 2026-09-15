@@ -4,6 +4,7 @@ import { computed, ref, watch } from "vue";
 type GroupFormPayload = {
   name: string;
   targetBaseUrl: string;
+  upstreamTimeoutMs: number | null;
 };
 
 const props = defineProps<{
@@ -14,6 +15,7 @@ const props = defineProps<{
   loading: boolean;
   initialName: string;
   initialTargetBaseUrl: string;
+  initialUpstreamTimeoutMs: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -23,6 +25,7 @@ const emit = defineEmits<{
 
 const name = ref("");
 const targetBaseUrl = ref("");
+const timeoutMs = ref("");
 
 const canSubmit = computed(() => {
   return !props.loading && name.value.trim().length > 0 && targetBaseUrl.value.trim().length > 0;
@@ -31,6 +34,10 @@ const canSubmit = computed(() => {
 const syncFormFromProps = (): void => {
   name.value = props.initialName;
   targetBaseUrl.value = props.initialTargetBaseUrl;
+  timeoutMs.value =
+    props.initialUpstreamTimeoutMs && props.initialUpstreamTimeoutMs > 0
+      ? String(props.initialUpstreamTimeoutMs)
+      : "";
 };
 
 watch(
@@ -43,7 +50,7 @@ watch(
 );
 
 watch(
-  () => [props.initialName, props.initialTargetBaseUrl] as const,
+  () => [props.initialName, props.initialTargetBaseUrl, props.initialUpstreamTimeoutMs] as const,
   () => {
     if (props.open) {
       syncFormFromProps();
@@ -69,9 +76,16 @@ const onSubmit = (): void => {
     return;
   }
 
+  const parsedTimeout = Number(timeoutMs.value.trim());
+  const upstreamTimeoutMs =
+    timeoutMs.value.trim().length > 0 && Number.isFinite(parsedTimeout) && parsedTimeout > 0
+      ? Math.floor(parsedTimeout)
+      : null;
+
   emit("submit", {
     name: name.value.trim(),
     targetBaseUrl: targetBaseUrl.value.trim(),
+    upstreamTimeoutMs,
   });
 };
 </script>
@@ -105,6 +119,17 @@ const onSubmit = (): void => {
               class="modal-input"
               type="text"
               placeholder="请输入 http/https 地址（必填且唯一）"
+            />
+          </div>
+
+          <div class="modal-field">
+            <label class="modal-label">上游超时（毫秒，留空用全局默认）</label>
+            <input
+              v-model="timeoutMs"
+              class="modal-input"
+              type="number"
+              min="1"
+              placeholder="例如 60000"
             />
           </div>
 

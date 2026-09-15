@@ -61,10 +61,12 @@ export const createTestConfig = (
     historyLimit: 1_000,
     historyPersistLimit: 200,
     effectiveHistoryPersistLimit: 200,
+    historyPersistBodyLimitBytes: 64 * 1024,
     disableStartupBanner: true,
     dataDir: "/tmp/proxira-test",
     configFile: "/tmp/proxira-test/config.json",
     historyFile: "/tmp/proxira-test/history.json",
+    rulesFile: "/tmp/proxira-test/rules.json",
     defaultTargetBaseUrl: "http://upstream.test",
     proxyPrefixEnabled: true,
     proxyPrefix: "/proxira",
@@ -73,6 +75,7 @@ export const createTestConfig = (
     httpsEnabled: false,
     httpsKeyPath: null,
     httpsCertPath: null,
+    accessToken: null,
     ...overrides,
   };
 };

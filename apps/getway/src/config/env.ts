@@ -85,6 +85,13 @@ export const loadRuntimeConfig = (
     env.PROXY_HISTORY_PERSIST_LIMIT,
     200,
   );
+  // Bodies are re-clipped to this size when written to history.json: full
+  // bodies (up to maxBodyCaptureBytes) stay in memory, but the persist file
+  // stays bounded instead of growing to hundreds of megabytes.
+  const historyPersistBodyLimitBytes = normalizePositiveInteger(
+    env.PROXY_HISTORY_PERSIST_BODY_LIMIT,
+    64 * 1024,
+  );
   const effectiveHistoryPersistLimit = Math.min(
     historyLimit,
     historyPersistLimit,
@@ -135,10 +142,12 @@ export const loadRuntimeConfig = (
     historyLimit,
     historyPersistLimit,
     effectiveHistoryPersistLimit,
+    historyPersistBodyLimitBytes,
     disableStartupBanner: env.PROXY_DISABLE_BANNER === "1",
     dataDir,
     configFile: join(dataDir, "config.json"),
     historyFile: join(dataDir, "history.json"),
+    rulesFile: join(dataDir, "rules.json"),
     defaultTargetBaseUrl:
       env.PROXY_TARGET_URL?.trim() || "http://localhost:8080",
     proxyPrefixEnabled,
@@ -148,5 +157,8 @@ export const loadRuntimeConfig = (
     httpsEnabled: env.PROXY_HTTPS_ENABLED === "1",
     httpsKeyPath: env.PROXY_HTTPS_KEY_PATH?.trim() || null,
     httpsCertPath: env.PROXY_HTTPS_CERT_PATH?.trim() || null,
+    // Off by default: the server binds 127.0.0.1, so only expose it publicly
+    // with a token when the user explicitly asks for it.
+    accessToken: env.PROXY_ACCESS_TOKEN?.trim() || null,
   };
 };

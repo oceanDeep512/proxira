@@ -41,6 +41,7 @@ export const printStartupInfo = (options: {
     console.log(`数据目录：${config.dataDir}`);
     console.log(`历史记录上限：${historyLimit}`);
     console.log(`本地持久化最近条数：${effectiveHistoryPersistLimit}`);
+    console.log(`访问令牌：${config.accessToken ? "已启用" : "未启用"}`);
     if (dashboard.dashboardDistDir) {
       console.log(`管理面板：${dashboardUrl}`);
     } else {
@@ -75,6 +76,9 @@ export const printStartupInfo = (options: {
     `${chalk.bold("Persist Recent")}: ${chalk.gray(
       String(effectiveHistoryPersistLimit),
     )}`,
+    `${chalk.bold("Access Token")}: ${
+      config.accessToken ? chalk.green("enabled") : chalk.gray("disabled")
+    }`,
     `${chalk.bold("Data Dir")}: ${chalk.gray(config.dataDir)}`,
   ].join("\n");
 

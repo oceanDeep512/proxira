@@ -4,7 +4,15 @@ export type ProxyHeaders = Record<string, ProxyHeaderValue>;
 export type ProxyQueryValue = string | string[];
 export type ProxyQueryParams = Record<string, ProxyQueryValue>;
 
-export type BodyFormat = "json" | "xml" | "form-urlencoded" | "html" | "yaml" | "text" | "binary";
+export type BodyFormat =
+  | "json"
+  | "xml"
+  | "form-urlencoded"
+  | "html"
+  | "yaml"
+  | "text"
+  | "csv"
+  | "binary";
 
 export interface ProxyPayloadBody {
   text: string | null;
@@ -24,7 +32,56 @@ export interface ProxyGroup {
   id: string;
   name: string;
   targetBaseUrl: string;
+  /** Upstream timeout override in ms; null means "use the global default". */
+  upstreamTimeoutMs: number | null;
 }
+
+// ---- Intervention rules -------------------------------------------------
+// Rules let the proxy answer or sabotage a request on purpose, so failure
+// paths (timeouts, truncated streams, 5xx) can be reproduced without touching
+// the app under test.
+
+export type ProxyRuleActionType =
+  | "mock"
+  | "error"
+  | "delay"
+  | "break_stream"
+  | "truncate";
+
+export type ProxyRule = {
+  id: string;
+  groupId: string;
+  name: string;
+  enabled: boolean;
+  /** Substring match against the incoming path (case-insensitive). */
+  matchPath: string;
+  /** Optional method filter; null matches every method. */
+  matchMethod: string | null;
+  /** Extra delay before anything else happens. */
+  delayMs: number;
+  action: ProxyRuleActionType;
+  /** mock: response status code. */
+  status: number;
+  /** mock: response headers. */
+  headers: ProxyHeaders;
+  /** mock: response body (sent at once, or chunk by chunk when streaming). */
+  body: string;
+  /** mock: emit the body as an SSE stream, one chunk per line block. */
+  stream: boolean;
+  /** mock: gap between streamed chunks. */
+  chunkIntervalMs: number;
+  /** error: message returned to the client. */
+  message: string;
+  /** break_stream: stop the response after this many chunks. */
+  afterChunks: number;
+  /** truncate: keep only this many bytes of the response. */
+  keepBytes: number;
+};
+
+export type ProxyRulesResponse = {
+  groupId: string;
+  items: ProxyRule[];
+};
 
 export interface ProxyTrafficRecord {
   id: string;
@@ -41,7 +98,13 @@ export interface ProxyTrafficRecord {
   responseBody: ProxyPayloadBody | null;
   durationMs: number;
   error: string | null;
+  /** Id of the intervention rule that produced this response, if any. */
+  appliedRuleId: string | null;
+  /** Where this entry came from: a proxied request or a manual replay. */
+  source: ProxyRecordSource;
 }
+
+export type ProxyRecordSource = "proxy" | "replay";
 
 export interface ProxyRecordsResponse {
   groupId: string;

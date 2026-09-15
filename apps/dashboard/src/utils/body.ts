@@ -11,6 +11,7 @@ import YAML from "js-yaml";
 import { XMLParser } from "fast-xml-parser";
 import xmlFormat from "xml-formatter";
 import { formatBytes, toPrettyJson } from "./format.js";
+import { redactJsonValue, redactText } from "./redact.js";
 
 export type SseEventView = {
   event: string;
@@ -444,6 +445,26 @@ export const bodyCodeClass = (body: BodyView): string =>
     : body.mode === "markdown"
       ? "language-markdown"
       : "language-xml";
+
+// Mask credentials inside an already-parsed body view. JSON bodies get key-aware
+// masking, everything else falls back to a best-effort text pass. SSE events are
+// redacted per-event too, or the event stream would leak what the raw body hides.
+export const redactBodyView = (body: BodyView): BodyView => {
+  const sseEvents =
+    body.sseEvents === null
+      ? null
+      : body.sseEvents.map((event) => ({
+          ...event,
+          data: redactText(event.data),
+          jsonData: event.jsonData === null ? null : redactJsonValue(event.jsonData),
+        }));
+  return {
+    ...body,
+    sseEvents,
+    jsonData: body.jsonData === null ? null : redactJsonValue(body.jsonData),
+    text: redactText(body.text),
+  };
+};
 
 export const bodyViewToCopyText = (body: BodyView): string => {
   if (body.mode === "json" || body.mode === "form-urlencoded") {

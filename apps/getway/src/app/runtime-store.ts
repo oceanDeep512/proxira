@@ -5,9 +5,12 @@ import type {
   ProxyRecordDetailResponse,
   ProxyRecordsExportResponse,
   ProxyRecordsResponse,
+  ProxyRule,
   ProxySseEvent,
   ProxyTrafficRecord,
 } from "@proxira/core";
+import type { RuleInput } from "../rules/utils.js";
+import { createRule, findMatchingRule } from "../rules/utils.js";
 import type {
   ExportRecordsQuery,
   RecordsQuery,
@@ -18,7 +21,42 @@ import { AppError } from "../shared/errors.js";
 import { readJsonFile, saveJsonFile } from "../shared/files.js";
 import { encodeFilenameRFC5987, toSafeAsciiToken } from "../shared/format.js";
 import { normalizeRecord, ensureUniqueRecordId, filterRecords } from "../history/utils.js";
-import { createGroup, normalizeGroupName, normalizeTargetBaseUrl } from "../groups/utils.js";
+import { createGroup, normalizeGroupName, normalizeTargetBaseUrl, normalizeTimeout } from "../groups/utils.js";
+import type { RuntimeConfig } from "./types.js";
+
+// Bodies are re-clipped before hitting disk: memory keeps the full capture
+// (up to maxBodyCaptureBytes), while history.json only keeps a bounded prefix
+// so a few large downloads cannot balloon the persist file to hundreds of MB.
+const shrinkBodyForPersist = (
+  body: ProxyPayloadBody,
+  limitBytes: number,
+): ProxyPayloadBody => {
+  if (body.text === null || body.text.length <= limitBytes) {
+    return body;
+  }
+  return {
+    ...body,
+    text: body.text.slice(0, limitBytes),
+    truncated: true,
+  };
+};
+
+const shrinkRecordForPersist = (
+  record: ProxyTrafficRecord,
+  config: RuntimeConfig,
+): ProxyTrafficRecord => {
+  if (config.historyPersistBodyLimitBytes <= 0) {
+    return record;
+  }
+  const limit = config.historyPersistBodyLimitBytes;
+  return {
+    ...record,
+    requestBody: shrinkBodyForPersist(record.requestBody, limit),
+    responseBody: record.responseBody
+      ? shrinkBodyForPersist(record.responseBody, limit)
+      : null,
+  };
+};
 
 type SseClient = {
   id: string;
@@ -26,7 +64,7 @@ type SseClient = {
   heartbeatTimer: ReturnType<typeof setInterval>;
 };
 
-type PersistKind = "config" | "history";
+type PersistKind = "config" | "history" | "rules";
 
 type HistoryFilePayload = Record<string, ProxyTrafficRecord[]>;
 
@@ -36,6 +74,7 @@ export class RuntimeStore {
   private readonly deps: RuntimeDeps;
   private readonly proxyConfig: ProxyConfig;
   private readonly historyByGroup = new Map<string, ProxyTrafficRecord[]>();
+  private readonly rulesByGroup = new Map<string, ProxyRule[]>();
   private readonly sseClients = new Map<string, SseClient>();
   private persistQueue = Promise.resolve();
   private readonly pendingPersist = new Map<PersistKind, () => Promise<void>>();
@@ -61,6 +100,7 @@ export class RuntimeStore {
       this.deps.fs,
       this.deps.config.historyFile,
     );
+    const fileRules = await readJsonFile<ProxyRule[]>(this.deps.fs, this.deps.config.rulesFile);
 
     const normalizedDefaultTarget =
       normalizeTargetBaseUrl(this.deps.config.defaultTargetBaseUrl) ??
@@ -93,6 +133,7 @@ export class RuntimeStore {
           id: groupId,
           name: normalizeGroupName(group.name ?? "", hydratedGroups.length + 1),
           targetBaseUrl: normalizedTarget,
+          upstreamTimeoutMs: normalizeTimeout(group.upstreamTimeoutMs),
         });
         usedGroupIds.add(groupId);
         usedTargets.add(normalizedTarget);
@@ -133,8 +174,116 @@ export class RuntimeStore {
       );
     }
 
+    this.rulesByGroup.clear();
+    for (const group of hydratedGroups) {
+      this.rulesByGroup.set(group.id, this.hydrateGroupRules(fileRules, group.id));
+    }
+
     this.saveConfig();
     this.saveHistory();
+    this.saveRules();
+  }
+
+  private hydrateGroupRules(
+    fileRules: ProxyRule[] | null,
+    groupId: string,
+  ): ProxyRule[] {
+    if (!Array.isArray(fileRules)) {
+      return [];
+    }
+    return fileRules
+      .filter((rule) => rule && typeof rule.id === "string" && rule.groupId === groupId)
+      .map((rule) => createRule(groupId, rule as RuleInput, this.deps.randomUUID));
+  }
+
+  listRules(groupIdRaw: string | undefined): { groupId: string; items: ProxyRule[] } {
+    const group = this.resolveGroupOrActive(groupIdRaw);
+    if (!group) {
+      throw new AppError(404, "groupId not found.");
+    }
+    return { groupId: group.id, items: this.ensureGroupRules(group.id) };
+  }
+
+  // Returns the first enabled rule matching this request, or null.
+  matchRule(groupId: string, method: string, path: string): ProxyRule | null {
+    return findMatchingRule(this.ensureGroupRules(groupId), method, path);
+  }
+
+  createRuleEntry(
+    groupIdRaw: string | undefined,
+    input: RuleInput,
+  ): { rule: ProxyRule; items: ProxyRule[] } {
+    const group = this.resolveGroupOrActive(groupIdRaw);
+    if (!group) {
+      throw new AppError(404, "groupId not found.");
+    }
+    const rules = this.ensureGroupRules(group.id);
+    const rule = createRule(group.id, input, this.deps.randomUUID);
+    rules.push(rule);
+    this.saveRules();
+    return { rule, items: rules };
+  }
+
+  updateRuleEntry(
+    ruleId: string,
+    input: RuleInput,
+  ): { rule: ProxyRule; items: ProxyRule[] } | null {
+    for (const [groupId, rules] of this.rulesByGroup) {
+      const index = rules.findIndex((rule) => rule.id === ruleId);
+      if (index === -1) {
+        continue;
+      }
+      const current = rules[index];
+      if (!current) {
+        continue;
+      }
+      const next = createRule(groupId, { ...current, ...input }, () => ruleId);
+      rules[index] = next;
+      this.saveRules();
+      return { rule: next, items: rules };
+    }
+    return null;
+  }
+
+  deleteRuleEntry(ruleId: string): { removed: boolean; id: string } {
+    for (const rules of this.rulesByGroup.values()) {
+      const index = rules.findIndex((rule) => rule.id === ruleId);
+      if (index === -1) {
+        continue;
+      }
+      rules.splice(index, 1);
+      this.saveRules();
+      return { removed: true, id: ruleId };
+    }
+    return { removed: false, id: ruleId };
+  }
+
+  private ensureGroupRules(groupId: string): ProxyRule[] {
+    const existing = this.rulesByGroup.get(groupId);
+    if (existing) {
+      return existing;
+    }
+    const created: ProxyRule[] = [];
+    this.rulesByGroup.set(groupId, created);
+    return created;
+  }
+
+  private serializeRules(): ProxyRule[] {
+    const items: ProxyRule[] = [];
+    for (const group of this.proxyConfig.groups) {
+      items.push(...this.ensureGroupRules(group.id));
+    }
+    return items;
+  }
+
+  private saveRules(): void {
+    this.enqueuePersist("rules", async () => {
+      await saveJsonFile(
+        this.deps.fs,
+        this.deps.config.rulesFile,
+        this.serializeRules(),
+      );
+    });
   }
 
   getConfig(): ProxyConfig {
@@ -201,6 +350,7 @@ export class RuntimeStore {
     name: string;
     targetBaseUrl: string;
     switchToNew?: boolean | undefined;
+    upstreamTimeoutMs?: number | null | undefined;
   }): { group: ProxyGroup; config: ProxyConfig } {
     const groupName = payload.name.trim();
     if (!groupName) {
@@ -219,11 +369,15 @@ export class RuntimeStore {
       groupName,
       normalizedTarget,
       this.deps.randomUUID,
+      normalizeTimeout(payload.upstreamTimeoutMs),
     );
     this.proxyConfig.groups.push(nextGroup);
     this.ensureGroupHistory(nextGroup.id);
 
-    if (payload.switchToNew ?? true) {
+    // Creating a group must not silently move traffic: a brand new (possibly
+    // misconfigured) target would start receiving proxied requests. Callers
+    // switch explicitly via `switchToNew` or the group picker.
+    if (payload.switchToNew === true) {
       this.proxyConfig.activeGroupId = nextGroup.id;
     }
 
@@ -240,6 +394,7 @@ export class RuntimeStore {
       name?: string | undefined;
       targetBaseUrl?: string | undefined;
       makeActive?: boolean | undefined;
+      upstreamTimeoutMs?: number | null | undefined;
     },
   ): { group: ProxyGroup; config: ProxyConfig } {
     const group = this.findGroupById(groupId);
@@ -250,10 +405,11 @@ export class RuntimeStore {
     const hasName = typeof payload.name === "string";
     const hasTarget = typeof payload.targetBaseUrl === "string";
     const hasActive = typeof payload.makeActive === "boolean";
-    if (!hasName && !hasTarget && !hasActive) {
+    const hasTimeout = payload.upstreamTimeoutMs !== undefined;
+    if (!hasName && !hasTarget && !hasActive && !hasTimeout) {
       throw new AppError(
         400,
-        "name, targetBaseUrl or makeActive is required.",
+        "name, targetBaseUrl, makeActive or upstreamTimeoutMs is required.",
       );
     }
 
@@ -284,6 +440,10 @@ export class RuntimeStore {
       group.targetBaseUrl = normalizedTarget;
     }
 
+    if (hasTimeout) {
+      group.upstreamTimeoutMs = normalizeTimeout(payload.upstreamTimeoutMs);
+    }
+
     if (payload.makeActive) {
       this.proxyConfig.activeGroupId = group.id;
     }
@@ -311,6 +471,7 @@ export class RuntimeStore {
     const clearedRecords = removedHistory.length;
     this.proxyConfig.groups.splice(groupIndex, 1);
     this.historyByGroup.delete(groupId);
+    this.rulesByGroup.delete(groupId);
 
     if (this.proxyConfig.groups.length === 0) {
       const fallbackTarget =
@@ -368,6 +529,8 @@ export class RuntimeStore {
 
     this.historyByGroup.clear();
     this.historyByGroup.set(nextDefaultGroup.id, []);
+    this.rulesByGroup.clear();
+    this.rulesByGroup.set(nextDefaultGroup.id, []);
 
     this.saveConfig();
     this.saveHistory();
@@ -745,10 +908,9 @@ export class RuntimeStore {
   private serializeHistory(): HistoryFilePayload {
     const payload: HistoryFilePayload = {};
     for (const group of this.proxyConfig.groups) {
-      payload[group.id] = this.ensureGroupHistory(group.id).slice(
-        0,
-        this.deps.config.effectiveHistoryPersistLimit,
-      );
+      payload[group.id] = this.ensureGroupHistory(group.id)
+        .slice(0, this.deps.config.effectiveHistoryPersistLimit)
+        .map((record) => shrinkRecordForPersist(record, this.deps.config));
     }
     return payload;
   }

@@ -54,6 +54,32 @@ export const isStreamingContentType = (contentType: string | null): boolean => {
   return STREAMING_MIME_TYPES.has(mimeType);
 };
 
+// Tabular payloads are labelled up front so the dashboard can render them as
+// a table without guessing from the raw text.
+const looksLikeCsv = (text: string): boolean => {
+  const lines = text
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return false;
+  }
+
+  const sample = lines.slice(0, 5);
+  const delimiter = sample.some((line) => line.includes("\t"))
+    ? "\t"
+    : sample.some((line) => line.includes(","))
+      ? ","
+      : "";
+  if (!delimiter) {
+    return false;
+  }
+
+  const widths = sample.map((line) => line.split(delimiter).length);
+  return Math.min(...widths) > 1 && Math.max(...widths) - Math.min(...widths) <= 1;
+};
+
 const detectBodyFormat = (
   bytes: Uint8Array,
   contentType: string | null,
@@ -80,6 +106,9 @@ const detectBodyFormat = (
   }
   if (mimeType.includes("yaml") || mimeType.includes("yml")) {
     return "yaml";
+  }
+  if (mimeType.includes("csv") || mimeType.includes("tab-separated-values")) {
+    return "csv";
   }
 
   // Check by content sniffing
@@ -111,6 +140,10 @@ const detectBodyFormat = (
     if (firstEquals > 0 && (hasAmpersand || preview.length < 1000)) {
       return "form-urlencoded";
     }
+  }
+
+  if (looksLikeCsv(textDecoder.decode(bytes.slice(0, 4096)))) {
+    return "csv";
   }
 
   return "text";

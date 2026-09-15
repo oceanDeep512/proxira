@@ -83,6 +83,30 @@ describe("collectBody - format detection", () => {
     const result = collectBody(bytes, null, bodyLimit);
     expect(result.format).toBe("text");
   });
+
+  it("should detect CSV by Content-Type", () => {
+    const bytes = textEncoder.encode("id,name\n1,alice\n2,bob\n");
+    const result = collectBody(bytes, "text/csv", bodyLimit);
+    expect(result.format).toBe("csv");
+  });
+
+  it("should detect CSV by content shape", () => {
+    const bytes = textEncoder.encode("id,name,role\n1,alice,dev\n2,bob,design\n");
+    const result = collectBody(bytes, null, bodyLimit);
+    expect(result.format).toBe("csv");
+  });
+
+  it("should detect tab separated values as CSV", () => {
+    const bytes = textEncoder.encode("id\tname\n1\talice\n2\tbob\n");
+    const result = collectBody(bytes, "text/tab-separated-values", bodyLimit);
+    expect(result.format).toBe("csv");
+  });
+
+  it("should not treat single-line text as CSV", () => {
+    const bytes = textEncoder.encode("just,one,line");
+    const result = collectBody(bytes, null, bodyLimit);
+    expect(result.format).not.toBe("csv");
+  });
 });
 
 describe("collectBody - binary preview", () => {

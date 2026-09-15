@@ -24,10 +24,12 @@ export type RuntimeConfig = {
   historyLimit: number;
   historyPersistLimit: number;
   effectiveHistoryPersistLimit: number;
+  historyPersistBodyLimitBytes: number;
   disableStartupBanner: boolean;
   dataDir: string;
   configFile: string;
   historyFile: string;
+  rulesFile: string;
   defaultTargetBaseUrl: string;
   proxyPrefixEnabled: boolean;
   proxyPrefix: string;
@@ -36,6 +38,8 @@ export type RuntimeConfig = {
   httpsEnabled: boolean;
   httpsKeyPath: string | null;
   httpsCertPath: string | null;
+  /** Optional bearer token for the internal API/dashboard; null = open. */
+  accessToken: string | null;
 };
 
 export type RuntimeDeps = {

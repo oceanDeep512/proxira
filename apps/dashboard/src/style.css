@@ -549,6 +549,29 @@ body::before {
   min-height: 0;
 }
 
+.list-load-more {
+  flex: none;
+  margin-top: 6px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.list-load-more:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  color: var(--accent-strong);
+}
+
+.list-load-more:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .record-list-scroll .simplebar-content {
   padding-right: 0 !important;
 }
@@ -812,6 +835,21 @@ body::before {
   cursor: default;
 }
 
+.record-tag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-soft) 16%, transparent);
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.record-tag[data-tone="rule"] {
+  background: color-mix(in srgb, var(--accent, var(--accent-strong)) 18%, transparent);
+  color: var(--accent-strong);
+}
 
 .detail-layout {
   height: 100%;

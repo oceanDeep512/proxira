@@ -35,6 +35,10 @@ describe("createApp", () => {
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ message: "Invalid request." });
 
+    const initialConfig = await (
+      await app.request("/_proxira/api/config")
+    ).json();
+
     const created = await app.request("/_proxira/api/groups", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -47,8 +51,24 @@ describe("createApp", () => {
     const createdPayload = await created.json();
     expect(createdPayload).toMatchObject({
       group: { name: "staging", targetBaseUrl: "http://staging.test" },
-      config: { activeGroupId: createdPayload.group.id },
     });
+    // A new group must not hijack traffic: the active group stays untouched.
+    expect(createdPayload.config.activeGroupId).toBe(
+      initialConfig.activeGroupId,
+    );
+
+    // Switching is still possible explicitly.
+    const switched = await app.request("/_proxira/api/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "switching",
+        targetBaseUrl: "http://switching.test",
+        switchToNew: true,
+      }),
+    });
+    const switchedPayload = await switched.json();
+    expect(switchedPayload.config.activeGroupId).toBe(switchedPayload.group.id);
 
     const updated = await app.request(
       `/_proxira/api/groups/${createdPayload.group.id}`,
@@ -152,6 +172,42 @@ describe("createApp", () => {
       isBinary: false,
       format: "json",
     });
+  });
+
+  it("re-clips bodies on disk but keeps the full capture in memory", async () => {
+    const fullPayload = JSON.stringify({
+      ok: true,
+      message: "x".repeat(4_000),
+    });
+    const upstreamFetch = vi.fn(async () => {
+      return new Response(fullPayload, {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    }) as typeof fetch;
+
+    const { app, runtime, fs, config } = await createTestApp({
+      configOverrides: { historyPersistBodyLimitBytes: 128 },
+      fetchImpl: upstreamFetch,
+    });
+
+    await app.request("/proxira/api/big");
+    await runtime.flushPersist();
+
+    // In-memory view keeps everything the capture limit allows.
+    const records = await app.request("/_proxira/api/records?limit=10");
+    const payload = await records.json();
+    expect(payload.items[0]?.responseBody?.text).toBe(fullPayload);
+    expect(payload.items[0]?.responseBody?.truncated).toBe(false);
+
+    // history.json keeps only a bounded prefix per body.
+    const persisted = JSON.parse(await fs.readTextFile(config.historyFile));
+    const groupId = payload.groupId;
+    const persistedRecord = persisted[groupId][0];
+    expect(persistedRecord.responseBody.text.length).toBe(128);
+    expect(persistedRecord.responseBody.truncated).toBe(true);
+    // The true size is preserved so the UI can still say how big it was.
+    expect(persistedRecord.responseBody.size).toBe(fullPayload.length);
   });
 
   it("records the full response body when it fits within maxBodyCaptureBytes", async () => {
@@ -289,18 +345,22 @@ describe("createApp", () => {
     expect(reader).toBeDefined();
     const chunk = await reader!.read();
     expect(new TextDecoder().decode(chunk.value)).toBe("data: hello\n\n");
-    // A real SSE response never ends; reading the whole thing would hang, which
-    // is exactly what the pass-through avoids. The cancel promise is not
-    // awaited on purpose: a tee'd branch only resolves cancel once every
-    // branch is cancelled, and the background sampler keeps its branch open.
+    // The response is still streamed straight through: no buffering, and the
+    // record already carries the sampled bytes instead of staying empty.
     void reader!.cancel();
 
     const records = await app.request("/_proxira/api/records?limit=10");
     const payload = await records.json();
-    expect(payload.items[0]).toMatchObject({
-      responseStatus: 200,
-      responseBody: null,
-    });
+    expect(payload.items[0]).toMatchObject({ responseStatus: 200 });
+    await vi.waitFor(
+      async () => {
+        const refreshed = await (
+          await app.request("/_proxira/api/records?limit=10")
+        ).json();
+        expect(refreshed.items[0]?.responseBody?.text).toContain("data: hello");
+      },
+      { timeout: 2_000, interval: 50 },
+    );
   });
 
   it("samples a finished streaming response into the history record", async () => {
@@ -339,6 +399,50 @@ describe("createApp", () => {
       truncated: false,
       isBinary: false,
     });
+  });
+
+  it("patches the record with partial bytes while the stream is still running", async () => {
+    const encoder = new TextEncoder();
+    let streamClosed = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"n":1}\n\n'));
+        // Second chunk lands while the stream is still open: the dashboard
+        // must receive it as a partial body update before the stream ends.
+        setTimeout(() => {
+          controller.enqueue(encoder.encode('data: {"n":2}\n\n'));
+        }, 1_200);
+        setTimeout(() => {
+          streamClosed = true;
+          controller.close();
+        }, 2_600);
+      },
+    });
+    const upstreamFetch = vi.fn(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+
+    const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+    const response = await app.request("/proxira/api/events");
+
+    // Give the second chunk time to arrive and be emitted as a partial body.
+    await new Promise((resolve) => setTimeout(resolve, 1_400));
+    await vi.waitFor(
+      async () => {
+        const records = await app.request("/_proxira/api/records?limit=10");
+        const payload = await records.json();
+        expect(payload.items[0]?.responseBody?.text).toContain('data: {"n":2}');
+        // The update must land before the stream itself closes.
+        expect(streamClosed).toBe(false);
+      },
+      { timeout: 1_000, interval: 100 },
+    );
+
+    // Drain the client branch so the test does not leave it dangling.
+    void response.body?.cancel().catch(() => undefined);
   });
 
   it("marks sampled streaming bodies as truncated past the capture limit", async () => {
@@ -391,6 +495,62 @@ describe("createApp", () => {
     expect(payload.items).toHaveLength(payload.total);
   });
 
+// Never resolves on its own: it must be cut off by the abort signal, exactly
+// like a real network fetch would be when the timeout fires.
+const hangingUpstream = (): typeof fetch =>
+  vi.fn(
+    (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      }),
+  ) as unknown as typeof fetch;
+
+
+
+
+  it("pages records by offset so the dashboard can load more", async () => {
+    const upstreamFetch = vi.fn(async () => {
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+    for (let i = 0; i < 5; i += 1) {
+      await app.request(`/proxira/api/page-${i}`);
+    }
+
+    const firstPage = await (
+      await app.request("/_proxira/api/records?limit=2&offset=0")
+    ).json();
+    const secondPage = await (
+      await app.request("/_proxira/api/records?limit=2&offset=2")
+    ).json();
+    const lastPage = await (
+      await app.request("/_proxira/api/records?limit=2&offset=4")
+    ).json();
+
+    expect(firstPage.total).toBe(5);
+    expect(firstPage.items).toHaveLength(2);
+    expect(secondPage.items).toHaveLength(2);
+    expect(lastPage.items).toHaveLength(1);
+
+    const ids = [
+      ...firstPage.items,
+      ...secondPage.items,
+      ...lastPage.items,
+    ].map((item: { id: string }) => item.id);
+    expect(new Set(ids).size).toBe(5);
+  });
+
   it("collapses burst writes into a single persist and flushes on demand", async () => {
     const { app, runtime, fs } = await createTestApp({
       configOverrides: { persistDebounceMs: 5_000 },
@@ -435,4 +595,343 @@ describe("createApp", () => {
     expect(notFound.status).toBe(404);
     expect(await notFound.json()).toEqual({ message: "Not Found" });
   });
+
+  describe("intervention rules", () => {
+    const createRule = async (app: unknown, body: Record<string, unknown>) =>
+      await (app as { request: (path: string, init?: RequestInit) => Promise<Response> }).request(
+        "/_proxira/api/rules",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+
+    it("stubs a response with a mock rule without touching the upstream", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("real", { status: 200 }));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch as typeof fetch });
+
+      const created = await createRule(app, {
+        name: "stub users",
+        matchPath: "/api/users",
+        action: "mock",
+        status: 201,
+        headers: { "content-type": "application/json" },
+        body: '{"stub":true}',
+      });
+      expect(created.status).toBe(201);
+
+      const response = await app.request("/proxira/api/users");
+      expect(response.status).toBe(201);
+      expect(await response.text()).toBe('{"stub":true}');
+      expect(upstreamFetch).not.toHaveBeenCalled();
+
+      const records = await (await app.request("/_proxira/api/records?limit=1")).json();
+      expect(records.items[0].appliedRuleId).toBe((await created.json()).rule.id);
+    });
+
+    it("streams a mock rule body as SSE", async () => {
+      const { app } = await createTestApp();
+      await createRule(app, {
+        name: "stub stream",
+        matchPath: "/api/stream",
+        action: "mock",
+        stream: true,
+        chunkIntervalMs: 0,
+        body: 'data: {"n":1}\n\ndata: {"n":2}\n\n',
+      });
+
+      const response = await app.request("/proxira/api/stream");
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      const text = await response.text();
+      expect(text).toContain('data: {"n":1}');
+      expect(text).toContain('data: {"n":2}');
+    });
+
+    it("returns a simulated error for an error rule", async () => {
+      const { app } = await createTestApp();
+      await createRule(app, {
+        name: "boom",
+        matchPath: "/api/boom",
+        action: "error",
+        status: 503,
+        message: "upstream exploded",
+      });
+
+      const response = await app.request("/proxira/api/boom");
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ message: "upstream exploded" });
+    });
+
+    it("delays the upstream call for a delay rule", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("ok", { status: 200 }));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch as typeof fetch });
+      await createRule(app, {
+        name: "slow",
+        matchPath: "/api/slow",
+        action: "delay",
+        delayMs: 250,
+      });
+
+      const startedAt = Date.now();
+      const response = await app.request("/proxira/api/slow");
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200);
+      expect(await response.text()).toBe("ok");
+    });
+
+    it("breaks a stream after N chunks and truncates bodies", async () => {
+      const encoder = new TextEncoder();
+      const makeStreamApp = async (action: string, extra: Record<string, unknown>) => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (let i = 1; i <= 20; i += 1) {
+              controller.enqueue(encoder.encode(`data: {"n":${i}}\n\n`));
+            }
+            controller.close();
+          },
+        });
+        const upstreamFetch = vi.fn(
+          async () =>
+            new Response(stream, {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            }),
+        ) as typeof fetch;
+        const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+        await createRule(app, {
+          name: `${action} rule`,
+          matchPath: "/api/shape",
+          action,
+          ...extra,
+        });
+        return app;
+      };
+
+      const breakApp = await makeStreamApp("break_stream", { afterChunks: 2 });
+      const broken = await breakApp.request("/proxira/api/shape");
+      const brokenText = await broken.text();
+      expect((brokenText.match(/data:/g) ?? []).length).toBeLessThanOrEqual(3);
+
+      const truncateApp = await makeStreamApp("truncate", { keepBytes: 20 });
+      const truncated = await truncateApp.request("/proxira/api/shape");
+      expect((await truncated.text()).length).toBeLessThanOrEqual(20);
+    });
+
+    it("supports rule CRUD and disables matching when disabled", async () => {
+      const { app } = await createTestApp();
+      const created = await createRule(app, {
+        name: "toggle",
+        matchPath: "/api/toggle",
+        action: "mock",
+        body: "stubbed",
+      });
+      const { rule } = await created.json();
+
+      await app.request(`/_proxira/api/rules/${rule.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      // Disabled rules are skipped entirely: the request reaches the upstream.
+      const passthrough = await app.request("/proxira/api/toggle");
+      expect(await passthrough.text()).toContain("ok");
+
+      const removed = await app.request(`/_proxira/api/rules/${rule.id}`, {
+        method: "DELETE",
+      });
+      expect(await removed.json()).toMatchObject({ removed: true });
+      const listed = await (await app.request("/_proxira/api/rules")).json();
+      expect(listed.items).toHaveLength(0);
+    });
+  });
+
+  describe("request replay", () => {
+    it("re-issues a recorded request and records the new response", async () => {
+      const upstreamFetch = vi.fn(async () => {
+        return new Response(JSON.stringify({ ok: true, attempt: 2 }), {
+          status: 200,
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }) as typeof fetch;
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      await app.request("/proxira/api/first", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hello: "world" }),
+      });
+      const before = await (await app.request("/_proxira/api/records?limit=5")).json();
+      const original = before.items[0];
+
+      const replayed = await app.request("/_proxira/api/replay", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recordId: original.id }),
+      });
+      const payload = await replayed.json();
+      expect(payload.ok).toBe(true);
+      expect(payload.status).toBe(200);
+      expect(payload.body).toContain("attempt");
+      expect(upstreamFetch).toHaveBeenCalledTimes(2);
+
+      // The replay itself shows up in the history, flagged so the UI can tell
+      // it apart from the original request.
+      const after = await (await app.request("/_proxira/api/records?limit=5")).json();
+      expect(after.items).toHaveLength(2);
+      expect(after.items[0].id).toBe(payload.recordId);
+      expect(after.items[0].source).toBe("replay");
+      expect(after.items[1].source).toBe("proxy");
+    });
+
+    it("replays an edited request", async () => {
+      const upstreamFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        return new Response(
+          JSON.stringify({ method: init?.method, url: String(input) }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch;
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      const replayed = await app.request("/_proxira/api/replay", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "PUT",
+          url: "http://upstream.test/api/edited",
+          headers: { "content-type": "application/json" },
+          body: '{"edited":true}',
+        }),
+      });
+      const payload = await replayed.json();
+      expect(payload.status).toBe(200);
+      expect(payload.body).toContain("PUT");
+      expect(payload.body).toContain("api/edited");
+    });
+  });
+
+  describe("optional access token", () => {
+    it("rejects internal requests without the token when one is configured", async () => {
+      const { app } = await createTestApp({
+        configOverrides: { accessToken: "secret-token" },
+      });
+
+      const unauthenticated = await app.request("/_proxira/api/config");
+      expect(unauthenticated.status).toBe(401);
+      expect(await unauthenticated.json()).toEqual({ message: "Unauthorized" });
+    });
+
+    it("accepts the token via header or query string", async () => {
+      const { app } = await createTestApp({
+        configOverrides: { accessToken: "secret-token" },
+      });
+
+      const viaHeader = await app.request("/_proxira/api/config", {
+        headers: { authorization: "Bearer secret-token" },
+      });
+      expect(viaHeader.status).toBe(200);
+
+      const viaQuery = await app.request("/_proxira/api/config?token=secret-token");
+      expect(viaQuery.status).toBe(200);
+
+      const wrongToken = await app.request("/_proxira/api/config?token=nope");
+      expect(wrongToken.status).toBe(401);
+    });
+
+    it("leaves internal routes open when no token is configured", async () => {
+      const { app } = await createTestApp();
+      const response = await app.request("/_proxira/api/config");
+      expect(response.status).toBe(200);
+    });
+
+    it("keeps the SSE stream protected", async () => {
+      const { app } = await createTestApp({
+        configOverrides: { accessToken: "secret-token" },
+      });
+      const response = await app.request("/_proxira/api/events");
+      expect(response.status).toBe(401);
+    });
+
+    // The browser cannot attach a token to <script>/<link>/<img> requests, so the
+    // dashboard shell would never boot if those were protected too.
+    it("still serves the dashboard shell and its assets without a token", async () => {
+      const { app } = await createTestApp({
+        configOverrides: {
+          accessToken: "secret-token",
+          dashboardDistDir: "/dashboard-dist",
+        },
+        files: {
+          "/dashboard-dist/index.html": "<html>dashboard</html>",
+          "/dashboard-dist/assets/app.js": "console.log('ok')",
+          "/dashboard-dist/favicon.svg": "<svg></svg>",
+        },
+      });
+
+      const shell = await app.request("/_proxira/ui/");
+      expect(shell.status).toBe(200);
+      expect(await shell.text()).toContain("dashboard");
+
+      const bundle = await app.request("/_proxira/ui/assets/app.js");
+      expect(bundle.status).toBe(200);
+
+      const favicon = await app.request("/_proxira/ui/favicon.svg");
+      expect(favicon.status).toBe(200);
+    });
+  });
+
+  describe("upstream timeout overrides", () => {
+    it("times out with the global budget when the group has no override", async () => {
+      const { app } = await createTestApp({
+        fetchImpl: hangingUpstream(),
+        configOverrides: { upstreamTimeoutMs: 80 },
+      });
+
+      const startedAt = Date.now();
+      const response = await app.request("/proxira/api/slow");
+      const elapsed = Date.now() - startedAt;
+      expect(response.status).toBe(504);
+      expect(elapsed).toBeGreaterThanOrEqual(60);
+      expect(elapsed).toBeLessThan(600);
+    });
+
+    it("times out with the group override when one is configured", async () => {
+      const { app } = await createTestApp({
+        fetchImpl: hangingUpstream(),
+        configOverrides: { upstreamTimeoutMs: 80 },
+      });
+
+      const config = await (await app.request("/_proxira/api/config")).json();
+      const patched = await app.request(
+        `/_proxira/api/groups/${config.activeGroupId}`,
+        {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ upstreamTimeoutMs: 400 }),
+        },
+      );
+      expect(patched.status).toBe(200);
+      expect((await patched.json()).group.upstreamTimeoutMs).toBe(400);
+
+      const startedAt = Date.now();
+      const response = await app.request("/proxira/api/slow");
+      const elapsed = Date.now() - startedAt;
+      expect(response.status).toBe(504);
+      // The override must win: well above the 80ms global budget.
+      expect(elapsed).toBeGreaterThanOrEqual(320);
+      const payload = await response.json();
+      expect(payload.error).toContain("400ms");
+
+      // Clearing the override restores the global budget.
+      await app.request(`/_proxira/api/groups/${config.activeGroupId}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ upstreamTimeoutMs: null }),
+      });
+      const restartedAt = Date.now();
+      const restored = await app.request("/proxira/api/slow");
+      expect(restored.status).toBe(504);
+      expect(Date.now() - restartedAt).toBeLessThan(320);
+    });
+  });
+
 });
