@@ -125,7 +125,7 @@ npx proxira --https
 
 **注意**：使用自签名证书时，浏览器会提示安全警告，这是正常的。点击"高级" → "继续访问"即可。
 
-如果证书不在默认位置（`./.proxira/certs/`），也可以手动指定：
+如果证书不在默认位置（`<数据目录>/certs/`），也可以手动指定：
 
 ```bash
 npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.pem
@@ -167,7 +167,7 @@ proxira gen-cert [options]
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `-o, --output-dir <path>` | 证书输出目录 | `./.proxira/certs` |
+| `-o, --output-dir <path>` | 证书输出目录 | `<数据目录>/certs` |
 | `-c, --common-name <name>` | 证书通用名 | `localhost` |
 | `--days <number>` | 证书有效期天数 | `365` |
 | `-y, --yes` | 跳过确认提示，直接执行 | - |
@@ -178,6 +178,8 @@ proxira gen-cert [options]
 |------|------|
 | `clear-cache` | 清除本地缓存（配置 + 历史记录） |
 | `gen-cert` | 生成自签名 HTTPS 证书（自动检测环境） |
+| `data-dir` | 显示当前数据目录位置及其来源（参数 / 环境变量 / 用户级默认） |
+| `migrate-data` | 把旧版工作目录下的 `.proxira` 数据迁移到统一数据目录（`--from` 可指定旧目录） |
 
 ## 使用示例
 
@@ -310,13 +312,25 @@ npx proxira --token my-secret
 
 ## 数据存放位置
 
-默认写入运行目录下的 `.proxira/`（可用 `--data-dir` 改）：
+数据目录与启动端口、启动方式、工作目录无关，按优先级统一解析：
+
+1. `--data-dir <path>` 参数（相对路径相对当前目录解析）
+2. `PROXY_DATA_DIR` 环境变量
+3. 用户级默认目录：macOS `~/Library/Application Support/Proxira`，Linux `$XDG_DATA_HOME/Proxira`（默认 `~/.local/share/Proxira`），Windows `%APPDATA%\Proxira`
+
+默认目录内容：
 
 | 文件 | 内容 |
 | --- | --- |
 | `config.json` | 分组配置、当前激活分组 |
 | `history.json` | 按分组分桶的请求历史 |
 | `rules.json` | 各分组的拦截规则 |
+| `instance.json` | 运行实例锁（PID / 端口，用于检测同目录多实例） |
+| `certs/` | HTTPS 自签名证书 |
+
+启动 Banner 会显示当前数据目录及其来源；`proxira data-dir` 可随时查看。
+
+> 旧版本默认把数据写在启动目录下的 `./.proxira/`。启动时若在当前目录检测到旧目录且有数据，会打印迁移提示；执行 `proxira migrate-data` 即可把配置 / 历史 / 规则 / 证书复制到统一目录，历史不会丢。
 
 历史是防抖落盘的，进程退出前会强制刷盘；`proxira clear-cache` 可一次性清空配置与历史。
 

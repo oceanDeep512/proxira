@@ -177,10 +177,10 @@ npx proxira gen-cert
 npx proxira --https
 ```
 
-手动指定证书：
+手动指定证书（默认位于 `<数据目录>/certs/`）：
 
 ```bash
-npx proxira --https --https-key ./.proxira/certs/key.pem --https-cert ./.proxira/certs/cert.pem
+npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.pem
 ```
 
 ## CLI 命令
@@ -213,10 +213,28 @@ proxira gen-cert [options]
 
 | 参数 | 说明 | 默认值 |
 | --- | --- | --- |
-| `-o, --output-dir <path>` | 证书输出目录 | `./.proxira/certs` |
+| `-o, --output-dir <path>` | 证书输出目录 | `<数据目录>/certs` |
 | `-c, --common-name <name>` | 证书通用名 | `localhost` |
 | `--days <number>` | 证书有效期（天） | `365` |
 | `-y, --yes` | 跳过确认直接生成 | - |
+
+## 数据目录
+
+数据目录与启动端口、启动方式、工作目录**无关**，统一按以下优先级解析：
+
+1. `--data-dir <path>` 参数（相对路径相对当前目录解析）
+2. `PROXY_DATA_DIR` 环境变量
+3. 用户级默认目录：macOS `~/Library/Application Support/Proxira`，Linux `$XDG_DATA_HOME/Proxira`（默认 `~/.local/share/Proxira`），Windows `%APPDATA%\Proxira`
+
+目录内存放 `config.json`（分组配置）、`history.json`（请求历史）、`rules.json`（拦截规则）、`instance.json`（运行实例锁）与 `certs/`（证书）。启动 Banner 会显示当前数据目录及其来源。
+
+```bash
+proxira data-dir                        # 查看当前数据目录及来源
+proxira migrate-data                    # 把旧版工作目录下的 ./.proxira 迁移到统一目录
+proxira migrate-data --from /some/.proxira  # 指定旧目录迁移
+```
+
+> 旧版本默认把数据写在启动目录下的 `./.proxira/`。升级后启动时若检测到旧目录里有历史数据会给出提示，按上面命令迁移即可，历史不会丢。
 
 ## 开发命令（Monorepo）
 
