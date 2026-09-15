@@ -97,7 +97,7 @@ pnpm run release            # 发版并发布到 npm（注意要带 run）
 npx proxira@latest
 
 # 固定版本使用（便于团队复现）
-npx proxira@0.1.3
+npx proxira@0.1.7
 
 # 全局安装
 npm i -g proxira

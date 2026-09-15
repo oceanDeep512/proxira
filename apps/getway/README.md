@@ -58,8 +58,8 @@ Proxira 是一个**本地开发联调用的实时请求代理与观测工具**�
 # 直接运行最新版本（推荐）
 npx proxira@latest
 
-# 固定版本运行（适合团队统一环境，请替换为 npm 上的实际版本）
-npx proxira@0.2.0
+# 固定版本运行（适合团队统一环境，请换成 npm 上的实际版本）
+npx proxira@0.1.7
 
 # 全局安装
 npm i -g proxira
