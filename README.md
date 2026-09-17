@@ -15,7 +15,7 @@
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
-Proxira 是一个面向本地开发联调的代理与观测工具。你可以把前端、SDK、脚本请求统一指向本地代理入口，再通过 Web 管理面板实时查看请求/响应、耗时、错误、分组配置等信息。
+Proxira 是一个面向本地开发联调的代理与观测工具。你可以把前端、SDK、脚本请求统一指向本地代理入口，再通过 Web 管理面板实时查看请求/响应、耗时、错误、转发地址配置等信息。
 
 > [!IMPORTANT]
 > Proxira 的定位是本地开发调试工具，不建议直接暴露在公网环境。
@@ -24,7 +24,7 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 
 - 透明代理转发：保留 Method / Path / Query / Headers / Body。
 - 实时观测：SSE 推送请求事件，面板实时更新。
-- 多分组管理：每个分组独立上游地址与历史记录。
+- 多转发地址管理：每个转发地址独立上游地址与历史记录。
 - 便捷排查：支持状态筛选、方法筛选、耗时排序、时间排序。
 - 数据导出：历史记录支持导出 JSON。
 - 详情复制：一键复制 URL、Headers、Body、cURL。
@@ -98,7 +98,7 @@ pnpm run release            # 发版并发布到 npm（注意要带 run）
 npx proxira@latest
 
 # 固定版本使用（便于团队复现）
-npx proxira@0.1.8
+npx proxira@0.2.1
 
 # 全局安装
 npm i -g proxira
@@ -162,11 +162,11 @@ npx proxira --no-prefix --target http://localhost:8080
 > [!TIP]
 > 关闭前缀后，`/_proxira/*` 仍保留给管理面板与内部 API，其余路径会转发到上游。
 
-### 分组级超时
+### 转发地址级超时
 
-在面板「编辑当前分组」里可以单独设置上游超时（毫秒），留空则回落到全局的
+在面板「编辑当前转发地址」里可以单独设置上游超时（毫秒），留空则回落到全局的
 `PROXY_UPSTREAM_TIMEOUT_MS`（默认 30s）。适合某个上游特别慢、又不想把全局超时调大的场景，
-超时后该分组的请求返回 504。
+超时后该转发地址的请求返回 504。
 
 ## HTTPS 调试模式
 
@@ -227,7 +227,7 @@ proxira gen-cert [options]
 2. `PROXY_DATA_DIR` 环境变量
 3. 用户级默认目录：macOS `~/Library/Application Support/Proxira`，Linux `$XDG_DATA_HOME/Proxira`（默认 `~/.local/share/Proxira`），Windows `%APPDATA%\Proxira`
 
-目录内存放 `config.json`（分组配置）、`history.json`（请求历史）、`rules.json`（拦截规则）、`instance.json`（运行实例锁）与 `certs/`（证书）。启动 Banner 会显示当前数据目录及其来源。
+目录内存放 `config.json`（转发地址配置）、`history.json`（请求历史）、`rules.json`（拦截规则）、`instance.json`（运行实例锁）与 `certs/`（证书）。启动 Banner 会显示当前数据目录及其来源。
 
 ```bash
 proxira data-dir                        # 查看当前数据目录及来源
@@ -318,15 +318,15 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 | `GET` | `/_proxira/api/health` | 健康检查 |
 | `GET` | `/_proxira/api/status` | 服务状态 |
 | `GET` | `/_proxira/api/config` | 读取当前配置 |
-| `PUT` | `/_proxira/api/config` | 切换激活分组 |
-| `POST` | `/_proxira/api/groups` | 创建分组 |
-| `PUT` | `/_proxira/api/groups/:id` | 更新分组 |
-| `DELETE` | `/_proxira/api/groups/:id` | 删除分组 |
+| `PUT` | `/_proxira/api/config` | 切换激活转发地址 |
+| `POST` | `/_proxira/api/groups` | 创建转发地址 |
+| `PUT` | `/_proxira/api/groups/:id` | 更新转发地址 |
+| `DELETE` | `/_proxira/api/groups/:id` | 删除转发地址 |
 | `GET` | `/_proxira/api/records` | 查询历史 |
 | `GET` | `/_proxira/api/records/export` | 导出记录 |
 | `DELETE` | `/_proxira/api/records/:id` | 删除单条 |
-| `DELETE` | `/_proxira/api/records` | 清空分组历史 |
-| `GET` | `/_proxira/api/rules` | 查询当前分组的拦截规则 |
+| `DELETE` | `/_proxira/api/records` | 清空转发地址历史 |
+| `GET` | `/_proxira/api/rules` | 查询当前转发地址的拦截规则 |
 | `POST` | `/_proxira/api/rules` | 创建拦截规则 |
 | `PUT` | `/_proxira/api/rules/:id` | 更新拦截规则（含启用/停用） |
 | `DELETE` | `/_proxira/api/rules/:id` | 删除拦截规则 |
@@ -336,7 +336,7 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 
 ## 拦截规则（Mock / 故障注入）
 
-规则挂在**分组**上，按「路径包含 + 方法」匹配，命中的请求不再打上游：
+规则挂在**转发地址**上，按「路径包含 + 方法」匹配，命中的请求不再打上游：
 
 | 动作 | 作用 | 典型场景 |
 | --- | --- | --- |
