@@ -5,12 +5,41 @@ import { RuntimeStore } from "../app/runtime-store.js";
 import type { ProxyService } from "../proxy/service.js";
 import type { RuntimeConfig, RuntimeStatusFactory } from "../app/types.js";
 
+type ValidationIssue = {
+  path?: ReadonlyArray<PropertyKey> | undefined;
+  message?: string | undefined;
+};
+
+const readIssues = (error: unknown): ValidationIssue[] => {
+  if (!error || typeof error !== "object") {
+    return [];
+  }
+  const issues = (error as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? (issues as ValidationIssue[]) : [];
+};
+
+// Surface the validation detail instead of a blanket "Invalid request.": a
+// renamed wire key only ever shows up here, and a generic message turns a
+// five-second diagnosis into a long hunt.
 const validationHook = (
-  result: { success: boolean },
+  result: { success: boolean; error?: unknown },
   c: { json: (payload: unknown, status?: number) => Response },
 ) => {
   if (!result.success) {
-    return c.json({ message: "Invalid request." }, 400);
+    const detail = readIssues(result.error)
+      .map((issue) => {
+        if (!issue.message) {
+          return "";
+        }
+        const path = (issue.path ?? []).map(String).join(".");
+        return path ? `${path}: ${issue.message}` : issue.message;
+      })
+      .filter(Boolean)
+      .join("; ");
+    return c.json(
+      { message: detail ? `Invalid request: ${detail}` : "Invalid request." },
+      400,
+    );
   }
 };
 

@@ -82,8 +82,8 @@ export const useProxira = () => {
   const rules = ref<ProxyRule[]>([]);
   const recordsTotal = ref(0);
   const recordsLoadingMore = ref(false);
-  const groups = ref<ProxyGroup[]>([]);
-  const activeGroupId = ref("");
+  const targets = ref<ProxyGroup[]>([]);
+  const activeTargetId = ref("");
   const selectedRecordId = ref<string | null>(null);
   const connectionState = ref<ConnectionState>("connecting");
 
@@ -91,31 +91,32 @@ export const useProxira = () => {
   const exporting = ref(false);
   const clearingRecords = ref(false);
   const resettingAll = ref(false);
-  const groupModalSubmitting = ref(false);
-  const deleteGroupSubmitting = ref(false);
+  const targetModalSubmitting = ref(false);
+  const deleteTargetSubmitting = ref(false);
 
   let events: EventSource | null = null;
 
-  const activeGroup = computed(() => {
-    if (!activeGroupId.value) {
-      return groups.value[0] ?? null;
+  const activeTarget = computed(() => {
+    if (!activeTargetId.value) {
+      return targets.value[0] ?? null;
     }
     return (
-      groups.value.find((group) => group.id === activeGroupId.value) ??
-      groups.value[0] ??
+      targets.value.find((entry) => entry.id === activeTargetId.value) ??
+      targets.value[0] ??
       null
     );
   });
 
-  const currentGroupId = computed(() => activeGroup.value?.id ?? "");
+  const currentTargetId = computed(() => activeTarget.value?.id ?? "");
 
-  const withGroupQuery = (path: string): string => {
-    const groupId = currentGroupId.value;
-    if (!groupId) {
+  const withTargetQuery = (path: string): string => {
+    const targetId = currentTargetId.value;
+    if (!targetId) {
       return `${apiBase}${path}`;
     }
     const separator = path.includes("?") ? "&" : "?";
-    return `${apiBase}${path}${separator}groupId=${encodeURIComponent(groupId)}`;
+    // Wire contract: the query key stays groupId for backward compatibility.
+    return `${apiBase}${path}${separator}groupId=${encodeURIComponent(targetId)}`;
   };
 
   // Every request carries the access token when the server requires one.
@@ -123,12 +124,13 @@ export const useProxira = () => {
     fetch(withAccessToken(url), init);
 
   const syncConfig = (config: ProxyConfig): void => {
-    groups.value = config.groups;
-    const matchedGroup =
-      config.groups.find((group) => group.id === config.activeGroupId) ??
+    // Wire contract: config.groups / config.activeGroupId keep their persisted names.
+    targets.value = config.groups;
+    const matchedTarget =
+      config.groups.find((entry) => entry.id === config.activeGroupId) ??
       config.groups[0] ??
       null;
-    activeGroupId.value = matchedGroup?.id ?? "";
+    activeTargetId.value = matchedTarget?.id ?? "";
   };
 
   const pushRecord = (record: ProxyTrafficRecord): void => {
@@ -173,14 +175,14 @@ export const useProxira = () => {
   };
 
   const fetchRecords = async (): Promise<void> => {
-    if (!currentGroupId.value) {
+    if (!currentTargetId.value) {
       records.value = [];
       recordsTotal.value = 0;
       selectedRecordId.value = null;
       return;
     }
 
-    const response = await apiFetch(withGroupQuery("/_proxira/api/records?limit=500"));
+    const response = await apiFetch(withTargetQuery("/_proxira/api/records?limit=500"));
     if (!response.ok) {
       throw new Error("加载历史记录失败");
     }
@@ -204,7 +206,7 @@ export const useProxira = () => {
   // The server caps a single page, so anything beyond it is fetched on demand
   // instead of silently disappearing from the dashboard.
   const loadMoreRecords = async (): Promise<void> => {
-    if (!currentGroupId.value || recordsLoadingMore.value) {
+    if (!currentTargetId.value || recordsLoadingMore.value) {
       return;
     }
     if (records.value.length >= recordsTotal.value) {
@@ -214,7 +216,7 @@ export const useProxira = () => {
     recordsLoadingMore.value = true;
     try {
       const response = await apiFetch(
-        withGroupQuery(
+        withTargetQuery(
           `/_proxira/api/records?limit=500&offset=${records.value.length}`,
         ),
       );
@@ -234,11 +236,11 @@ export const useProxira = () => {
   };
 
   const fetchRules = async (): Promise<void> => {
-    if (!currentGroupId.value) {
+    if (!currentTargetId.value) {
       rules.value = [];
       return;
     }
-    const response = await apiFetch(withGroupQuery("/_proxira/api/rules"));
+    const response = await apiFetch(withTargetQuery("/_proxira/api/rules"));
     if (!response.ok) {
       throw new Error("加载规则失败");
     }
@@ -254,7 +256,7 @@ export const useProxira = () => {
       const response = await apiFetch(
         ruleId
           ? `${apiBase}/_proxira/api/rules/${encodeURIComponent(ruleId)}`
-          : withGroupQuery("/_proxira/api/rules"),
+          : withTargetQuery("/_proxira/api/rules"),
         {
           method: ruleId ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },
@@ -327,10 +329,10 @@ export const useProxira = () => {
 
   const applySseEvent = (event: ProxySseEvent): void => {
     if (event.type === "snapshot" || event.type === "config") {
-      const previousGroupId = currentGroupId.value;
+      const previousTargetId = currentTargetId.value;
       syncConfig(event.config);
-      const nextGroupId = currentGroupId.value;
-      if (previousGroupId !== nextGroupId) {
+      const nextTargetId = currentTargetId.value;
+      if (previousTargetId !== nextTargetId) {
         void fetchRecords().catch((error) => {
           pushToast(
             error instanceof Error ? error.message : "加载历史记录失败",
@@ -342,7 +344,7 @@ export const useProxira = () => {
     }
 
     if (event.type === "record") {
-      if (event.groupId !== currentGroupId.value) {
+      if (event.groupId !== currentTargetId.value) {
         return;
       }
       pushRecord(event.record);
@@ -350,7 +352,7 @@ export const useProxira = () => {
     }
 
     if (event.type === "record_deleted") {
-      if (event.groupId !== currentGroupId.value) {
+      if (event.groupId !== currentTargetId.value) {
         return;
       }
       removeRecordLocal(event.id);
@@ -358,7 +360,7 @@ export const useProxira = () => {
     }
 
     if (event.type === "records_cleared") {
-      if (event.groupId !== currentGroupId.value) {
+      if (event.groupId !== currentTargetId.value) {
         return;
       }
       records.value = [];
@@ -392,8 +394,8 @@ export const useProxira = () => {
     events?.close();
   });
 
-  const switchActiveGroup = async (nextGroupId: string): Promise<void> => {
-    if (!nextGroupId || nextGroupId === activeGroupId.value) {
+  const switchActiveTarget = async (nextTargetId: string): Promise<void> => {
+    if (!nextTargetId || nextTargetId === activeTargetId.value) {
       return;
     }
 
@@ -403,54 +405,58 @@ export const useProxira = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ activeGroupId: nextGroupId }),
+        // Wire contract: the payload key stays activeGroupId for backward
+        // compatibility, even though the UI now calls these "转发地址".
+        body: JSON.stringify({ activeGroupId: nextTargetId }),
       });
       if (!response.ok) {
-        throw new Error("切换分组失败");
+        throw new Error(
+          await extractErrorMessage(response, "切换转发地址失败"),
+        );
       }
 
       const config = (await response.json()) as ProxyConfig;
       syncConfig(config);
       await fetchRecords();
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : "切换分组失败", "error");
+      pushToast(error instanceof Error ? error.message : "切换转发地址失败", "error");
     }
   };
 
   const isTargetDuplicated = (
     normalizedTarget: string,
-    ignoreGroupId?: string,
+    ignoreTargetId?: string,
   ): boolean =>
-    groups.value.some((group) => {
-      if (ignoreGroupId && group.id === ignoreGroupId) {
+    targets.value.some((entry) => {
+      if (ignoreTargetId && entry.id === ignoreTargetId) {
         return false;
       }
-      return group.targetBaseUrl === normalizedTarget;
+      return entry.targetBaseUrl === normalizedTarget;
     });
 
-  const createGroup = async (
-    groupNameRaw: string,
+  const createTarget = async (
+    targetNameRaw: string,
     targetBaseUrlRaw: string,
     upstreamTimeoutMs: number | null = null,
   ): Promise<boolean> => {
-    const nextGroupName = groupNameRaw.trim();
-    if (!nextGroupName) {
-      pushToast("分组名称为必填项", "error");
+    const nextTargetName = targetNameRaw.trim();
+    if (!nextTargetName) {
+      pushToast("名称为必填项", "error");
       return false;
     }
 
     const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
     if (!normalizedTarget) {
-      pushToast("分组地址为必填项，且必须是 http/https URL", "error");
+      pushToast("转发地址为必填项，且必须是 http/https URL", "error");
       return false;
     }
 
     if (isTargetDuplicated(normalizedTarget)) {
-      pushToast("分组地址不能与已有分组重复", "error");
+      pushToast("转发地址不能与已有地址重复", "error");
       return false;
     }
 
-    groupModalSubmitting.value = true;
+    targetModalSubmitting.value = true;
     try {
       const response = await apiFetch(`${apiBase}/_proxira/api/groups`, {
         method: "POST",
@@ -458,73 +464,73 @@ export const useProxira = () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: nextGroupName,
+          name: nextTargetName,
           targetBaseUrl: normalizedTarget,
-          // Never hijack live traffic: creating a group leaves the active
-          // group untouched until the user switches on purpose.
+          // Never hijack live traffic: creating a target leaves the active
+          // target untouched until the user switches on purpose.
           switchToNew: false,
           upstreamTimeoutMs,
         }),
       });
       if (!response.ok) {
         throw new Error(
-          await extractErrorMessage(response, "创建分组失败，请检查地址格式"),
+          await extractErrorMessage(response, "创建转发地址失败，请检查地址格式"),
         );
       }
 
       const payload = (await response.json()) as { config: ProxyConfig };
       syncConfig(payload.config);
-      // Stay on the current group: fetchRecords refreshes the active group.
+      // Stay on the current target: fetchRecords refreshes the active target.
       await fetchRecords();
-      pushToast("分组已创建，需要时可在分组下拉中切换", "success");
+      pushToast("转发地址已创建，需要时可在顶部下拉中切换", "success");
       return true;
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : "创建分组失败", "error");
+      pushToast(error instanceof Error ? error.message : "创建转发地址失败", "error");
       return false;
     } finally {
-      groupModalSubmitting.value = false;
+      targetModalSubmitting.value = false;
     }
   };
 
-  const saveActiveGroup = async (
-    groupNameRaw: string,
+  const saveActiveTarget = async (
+    targetNameRaw: string,
     targetBaseUrlRaw: string,
     upstreamTimeoutMs: number | null = null,
   ): Promise<boolean> => {
-    if (!currentGroupId.value) {
-      pushToast("当前没有可用分组", "error");
+    if (!currentTargetId.value) {
+      pushToast("当前没有可用转发地址", "error");
       return false;
     }
 
-    const groupName = groupNameRaw.trim();
-    if (!groupName) {
-      pushToast("分组名称为必填项", "error");
+    const targetName = targetNameRaw.trim();
+    if (!targetName) {
+      pushToast("名称为必填项", "error");
       return false;
     }
 
     const normalizedTarget = normalizeTargetInput(targetBaseUrlRaw);
     if (!normalizedTarget) {
-      pushToast("分组地址必须是有效的 http/https URL", "error");
+      pushToast("转发地址必须是有效的 http/https URL", "error");
       return false;
     }
 
-    if (isTargetDuplicated(normalizedTarget, currentGroupId.value)) {
-      pushToast("分组地址不能与其他分组重复", "error");
+    if (isTargetDuplicated(normalizedTarget, currentTargetId.value)) {
+      pushToast("转发地址不能与其他地址重复", "error");
       return false;
     }
 
-    groupModalSubmitting.value = true;
+    targetModalSubmitting.value = true;
 
     try {
       const response = await apiFetch(
-        `${apiBase}/_proxira/api/groups/${encodeURIComponent(currentGroupId.value)}`,
+        `${apiBase}/_proxira/api/groups/${encodeURIComponent(currentTargetId.value)}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: groupName,
+            name: targetName,
             targetBaseUrl: normalizedTarget,
             makeActive: true,
             upstreamTimeoutMs,
@@ -540,27 +546,27 @@ export const useProxira = () => {
 
       const payload = (await response.json()) as { config: ProxyConfig };
       syncConfig(payload.config);
-      pushToast("分组配置已保存", "success");
+      pushToast("转发地址配置已保存", "success");
       return true;
     } catch (error) {
       pushToast(error instanceof Error ? error.message : "保存失败", "error");
       return false;
     } finally {
-      groupModalSubmitting.value = false;
+      targetModalSubmitting.value = false;
     }
   };
 
-  const deleteGroup = async (targetGroup: ProxyGroup): Promise<boolean> => {
-    deleteGroupSubmitting.value = true;
+  const deleteTarget = async (targetEntry: ProxyGroup): Promise<boolean> => {
+    deleteTargetSubmitting.value = true;
     try {
       const response = await apiFetch(
-        `${apiBase}/_proxira/api/groups/${encodeURIComponent(targetGroup.id)}`,
+        `${apiBase}/_proxira/api/groups/${encodeURIComponent(targetEntry.id)}`,
         {
           method: "DELETE",
         },
       );
       if (!response.ok) {
-        throw new Error(await extractErrorMessage(response, "删除分组失败"));
+        throw new Error(await extractErrorMessage(response, "删除转发地址失败"));
       }
 
       const payload = (await response.json()) as {
@@ -570,26 +576,26 @@ export const useProxira = () => {
       syncConfig(payload.config);
       await fetchRecords();
       pushToast(
-        `已删除分组「${targetGroup.name}」，清除 ${payload.clearedRecords} 条数据`,
+        `已删除转发地址「${targetEntry.name}」，清除 ${payload.clearedRecords} 条数据`,
         "success",
       );
       return true;
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : "删除分组失败", "error");
+      pushToast(error instanceof Error ? error.message : "删除转发地址失败", "error");
       return false;
     } finally {
-      deleteGroupSubmitting.value = false;
+      deleteTargetSubmitting.value = false;
     }
   };
 
   const removeRecord = async (recordId: string): Promise<void> => {
-    if (!currentGroupId.value) {
+    if (!currentTargetId.value) {
       return;
     }
 
     deletingRecordId.value = recordId;
     try {
-      const response = await apiFetch(withGroupQuery(`/_proxira/api/records/${recordId}`), {
+      const response = await apiFetch(withTargetQuery(`/_proxira/api/records/${recordId}`), {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -607,8 +613,8 @@ export const useProxira = () => {
     method: string;
     status: string;
   }): Promise<void> => {
-    if (!currentGroupId.value) {
-      pushToast("当前没有可导出的分组", "error");
+    if (!currentTargetId.value) {
+      pushToast("当前没有可导出的转发地址", "error");
       return;
     }
 
@@ -628,12 +634,12 @@ export const useProxira = () => {
       const path = queryText
         ? `/_proxira/api/records/export?${queryText}`
         : "/_proxira/api/records/export";
-      const response = await apiFetch(withGroupQuery(path));
+      const response = await apiFetch(withTargetQuery(path));
       if (!response.ok) {
         throw new Error("导出失败");
       }
 
-      const fallbackGroupName = activeGroup.value?.name?.trim() || "group";
+      const fallbackTargetName = activeTarget.value?.name?.trim() || "target";
       const responseText = await response.text();
       let rawPayload: unknown = {};
       if (responseText.trim().length > 0) {
@@ -644,8 +650,8 @@ export const useProxira = () => {
         }
       }
       const payload = normalizeExportPayload(rawPayload, {
-        groupId: currentGroupId.value,
-        groupName: fallbackGroupName,
+        groupId: currentTargetId.value,
+        groupName: fallbackTargetName,
       });
 
       const jsonText = toPrettyJson(payload);
@@ -653,13 +659,13 @@ export const useProxira = () => {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       const fileToken = payload.exportedAt.replace(/[:.]/g, "-");
-      const groupToken =
+      const targetToken =
         payload.groupName
           .replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, "-")
           .replace(/-+/g, "-")
-          .replace(/^-|-$/g, "") || "group";
+          .replace(/^-|-$/g, "") || "target";
       link.href = objectUrl;
-      link.download = `proxira-${groupToken}-records-${fileToken}.json`;
+      link.download = `proxira-${targetToken}-records-${fileToken}.json`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -677,14 +683,14 @@ export const useProxira = () => {
   };
 
   const clearRecords = async (): Promise<void> => {
-    if (!currentGroupId.value) {
-      pushToast("当前没有可清除的分组", "error");
+    if (!currentTargetId.value) {
+      pushToast("当前没有可清除的转发地址", "error");
       return;
     }
 
     clearingRecords.value = true;
     try {
-      const response = await apiFetch(withGroupQuery("/_proxira/api/records"), {
+      const response = await apiFetch(withTargetQuery("/_proxira/api/records"), {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -740,26 +746,26 @@ export const useProxira = () => {
     toggleRule,
     replayRecord,
     recordsLoadingMore,
-    groups,
-    activeGroup,
-    activeGroupId,
-    currentGroupId,
+    targets,
+    activeTarget,
+    activeTargetId,
+    currentTargetId,
     selectedRecordId,
     connectionState,
     deletingRecordId,
     exporting,
     clearingRecords,
     resettingAll,
-    groupModalSubmitting,
-    deleteGroupSubmitting,
+    targetModalSubmitting,
+    deleteTargetSubmitting,
     fetchConfig,
     fetchRecords,
     loadMoreRecords,
     connectSse,
-    switchActiveGroup,
-    createGroup,
-    saveActiveGroup,
-    deleteGroup,
+    switchActiveTarget,
+    createTarget,
+    saveActiveTarget,
+    deleteTarget,
     removeRecord,
     exportRecords,
     clearRecords,

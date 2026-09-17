@@ -114,7 +114,7 @@ const onOverlayClick = (event: MouseEvent): void => {
   line-height: 1.4;
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--error) 30%, var(--line));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--error) 8%, var(--surface-soft));
 }
 

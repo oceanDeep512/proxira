@@ -43,5 +43,5 @@ export const normalizeGroupName = (
   if (normalized.length > 0) {
     return normalized;
   }
-  return `分组 ${fallbackIndex}`;
+  return `转发地址 ${fallbackIndex}`;
 };

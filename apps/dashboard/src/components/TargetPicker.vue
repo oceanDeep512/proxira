@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import type { CSSProperties } from "vue";
 import type { ProxyGroup } from "@proxira/core";
 
 const props = defineProps<{
-  groups: ProxyGroup[];
+  targets: ProxyGroup[];
   modelValue: string;
-  allowDelete?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:modelValue": [id: string];
-  "request-delete": [id: string];
 }>();
 
 const open = ref(false);
@@ -21,13 +26,17 @@ const panelRef = ref<HTMLElement | null>(null);
 const panelStyle = ref<CSSProperties>({});
 const panelPlacement = ref<"below" | "above">("below");
 
-const hasGroups = computed(() => props.groups.length > 0);
+const hasTargets = computed(() => props.targets.length > 0);
 
-const activeGroup = computed(() => {
+const activeTarget = computed(() => {
   if (!props.modelValue) {
-    return props.groups[0] ?? null;
+    return props.targets[0] ?? null;
   }
-  return props.groups.find((group) => group.id === props.modelValue) ?? props.groups[0] ?? null;
+  return (
+    props.targets.find((entry) => entry.id === props.modelValue) ??
+    props.targets[0] ??
+    null
+  );
 });
 
 const updatePanelPosition = (): void => {
@@ -80,7 +89,7 @@ watch(open, async (isOpen) => {
 });
 
 const toggle = (): void => {
-  if (!hasGroups.value) {
+  if (!hasTargets.value) {
     return;
   }
   open.value = !open.value;
@@ -90,23 +99,11 @@ const close = (): void => {
   open.value = false;
 };
 
-const selectGroup = (groupId: string): void => {
-  if (groupId !== props.modelValue) {
-    emit("update:modelValue", groupId);
+const selectTarget = (targetId: string): void => {
+  if (targetId !== props.modelValue) {
+    emit("update:modelValue", targetId);
   }
   close();
-};
-
-const requestDelete = (): void => {
-  if (props.allowDelete === false) {
-    return;
-  }
-  const groupId = activeGroup.value?.id;
-  if (!groupId) {
-    return;
-  }
-  close();
-  emit("request-delete", groupId);
 };
 
 const handlePointerDown = (event: MouseEvent): void => {
@@ -142,43 +139,32 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="group-picker" :class="{ open }">
-    <div class="group-trigger-wrap">
+  <div ref="rootRef" class="target-picker" :class="{ open }">
+    <div class="target-trigger-wrap">
       <button
         ref="triggerRef"
-        class="group-trigger"
-        :class="{ disabled: !hasGroups }"
+        class="target-trigger"
+        :class="{ disabled: !hasTargets }"
         type="button"
         :aria-expanded="open"
         aria-haspopup="listbox"
-        :disabled="!hasGroups"
+        :disabled="!hasTargets"
         @click="toggle"
       >
-        <span class="group-trigger-main">
-          <span class="group-prefix">当前分组</span>
-          <span class="group-name">{{ activeGroup?.name ?? "暂无分组" }}</span>
-          <span class="group-target">{{ activeGroup?.targetBaseUrl ?? "-" }}</span>
+        <span class="target-trigger-main">
+          <span class="target-prefix">当前转发地址</span>
+          <span class="target-name">{{ activeTarget?.name ?? "暂无转发地址" }}</span>
+          <span class="target-target">{{
+            activeTarget?.targetBaseUrl ?? "-"
+          }}</span>
         </span>
-        <span class="group-arrow" :class="{ open }" aria-hidden="true">
+        <span class="target-arrow" :class="{ open }" aria-hidden="true">
           <svg viewBox="0 0 20 20">
-            <path d="M5.2 7.6a.9.9 0 0 1 1.3 0L10 11.1l3.5-3.5a.9.9 0 1 1 1.3 1.3l-4.1 4.1a.9.9 0 0 1-1.3 0L5.2 8.9a.9.9 0 0 1 0-1.3Z" />
+            <path
+              d="M5.2 7.6a.9.9 0 0 1 1.3 0L10 11.1l3.5-3.5a.9.9 0 1 1 1.3 1.3l-4.1 4.1a.9.9 0 0 1-1.3 0L5.2 8.9a.9.9 0 0 1 0-1.3Z"
+            />
           </svg>
         </span>
-      </button>
-      <button
-        v-if="allowDelete !== false && activeGroup"
-        class="group-delete round-icon-button"
-        type="button"
-        title="删除当前分组"
-        aria-label="删除当前分组"
-        data-tooltip="删除当前分组"
-        @click.stop="requestDelete"
-      >
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path
-            d="M7.5 2.5h5l.8 1.5H17a.9.9 0 1 1 0 1.8h-.9l-.7 10.2a1.8 1.8 0 0 1-1.8 1.7H6.4a1.8 1.8 0 0 1-1.8-1.7L3.9 5.8H3a.9.9 0 1 1 0-1.8h3.7l.8-1.5Zm-1.8 3.3.7 10.1h7.2l.7-10.1H5.7Zm2.1 1.6c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Zm4.4 0c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Z"
-          />
-        </svg>
       </button>
     </div>
 
@@ -187,25 +173,32 @@ onBeforeUnmount(() => {
         <ul
           v-if="open"
           ref="panelRef"
-          class="group-panel group-panel-layer"
+          class="target-panel target-panel-layer"
           :class="{ 'is-above': panelPlacement === 'above' }"
           :style="panelStyle"
           role="listbox"
         >
-          <li v-for="group in groups" :key="group.id">
+          <li v-for="target in targets" :key="target.id">
             <button
-              class="group-option"
+              class="target-option"
               type="button"
               role="option"
-              :aria-selected="group.id === modelValue"
-              :class="{ active: group.id === modelValue }"
-              @click="selectGroup(group.id)"
+              :aria-selected="target.id === modelValue"
+              :class="{ active: target.id === modelValue }"
+              @click="selectTarget(target.id)"
             >
-              <span class="group-option-main">
-                <span class="group-option-name">{{ group.name }}</span>
-                <span class="group-option-target">{{ group.targetBaseUrl }}</span>
+              <span class="target-option-main">
+                <span class="target-option-name">{{ target.name }}</span>
+                <span class="target-option-target">{{
+                  target.targetBaseUrl
+                }}</span>
               </span>
-              <span v-if="group.id === modelValue" class="group-option-check" aria-hidden="true">✓</span>
+              <span
+                v-if="target.id === modelValue"
+                class="target-option-check"
+                aria-hidden="true"
+                >✓</span
+              >
             </button>
           </li>
         </ul>
@@ -215,60 +208,62 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.group-picker {
+.target-picker {
   position: relative;
   width: 100%;
   z-index: 1;
 }
 
-.group-picker.open {
+.target-picker.open {
   z-index: 48;
 }
 
-.group-trigger {
+.target-trigger {
   width: 100%;
   min-height: 46px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
   color: var(--text);
-  padding: 8px 76px 8px 11px;
+  padding: 8px 36px 8px 11px;
   display: flex;
   justify-content: flex-start;
   align-items: center;
   text-align: left;
   cursor: pointer;
   position: relative;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
 
-.group-trigger-wrap {
+.target-trigger-wrap {
   position: relative;
 }
 
-.group-trigger:hover {
+.target-trigger:hover {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: color-mix(in srgb, var(--accent) 6%, var(--surface-soft));
 }
 
-.group-trigger.disabled {
+.target-trigger.disabled {
   cursor: default;
   opacity: 0.68;
 }
 
-.group-trigger:focus-visible {
+.target-trigger:focus-visible {
   outline: 3px solid var(--accent-soft);
   outline-offset: 1px;
 }
 
-.group-trigger-main {
+.target-trigger-main {
   min-width: 0;
   display: grid;
   gap: 2px;
   width: 100%;
 }
 
-.group-prefix {
+.target-prefix {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -277,13 +272,13 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
-.group-name {
+.target-name {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-.group-target {
+.target-target {
   min-width: 0;
   font-size: 10px;
   line-height: 1.2;
@@ -294,7 +289,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
 }
 
-.group-arrow {
+.target-arrow {
   width: 16px;
   height: 16px;
   color: var(--text-soft);
@@ -309,52 +304,17 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.group-arrow svg {
+.target-arrow svg {
   width: 100%;
   height: 100%;
   fill: currentColor;
 }
 
-.group-arrow.open {
+.target-arrow.open {
   transform: translateY(-50%) rotate(180deg);
 }
 
-.group-delete {
-  position: absolute;
-  top: 50%;
-  right: 34px;
-  transform: translateY(-50%);
-  width: 25px;
-  height: 25px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-soft);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
-}
-
-.group-delete:hover {
-  border-color: color-mix(in srgb, var(--error) 52%, var(--line));
-  color: var(--error);
-  background: color-mix(in srgb, var(--error) 10%, var(--surface));
-}
-
-.group-delete:focus-visible {
-  outline: 3px solid var(--accent-soft);
-  outline-offset: 1px;
-}
-
-.group-delete svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-
-.group-panel {
+.target-panel {
   margin: 0;
   padding: 6px;
   list-style: none;
@@ -365,19 +325,19 @@ onBeforeUnmount(() => {
   overflow: auto;
 }
 
-.group-panel-layer {
+.target-panel-layer {
   position: fixed;
   z-index: 4200;
 }
 
-.group-panel-layer.is-above {
+.target-panel-layer.is-above {
   transform: translateY(-100%);
 }
 
-.group-option {
+.target-option {
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   padding: 8px;
@@ -389,29 +349,29 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.group-option-main {
+.target-option-main {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.group-option:hover {
+.target-option:hover {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
 
-.group-option.active {
+.target-option.active {
   border-color: color-mix(in srgb, var(--accent) 64%, var(--line));
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
-.group-option-name {
+.target-option-name {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-.group-option-target {
+.target-option-target {
   font-size: 10px;
   color: var(--text-soft);
   line-height: 1.25;
@@ -419,7 +379,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
 }
 
-.group-option-check {
+.target-option-check {
   font-size: 12px;
   line-height: 1.2;
   font-weight: 800;

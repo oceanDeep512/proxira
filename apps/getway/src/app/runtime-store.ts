@@ -146,7 +146,7 @@ export class RuntimeStore {
         : null;
       hydratedGroups.push(
         createGroup(
-          "默认分组",
+          "默认转发地址",
           legacyTarget ?? normalizedDefaultTarget,
           this.deps.randomUUID,
         ),
@@ -334,7 +334,7 @@ export class RuntimeStore {
       ) {
         throw new AppError(
           409,
-          "targetBaseUrl already exists in another group.",
+          "targetBaseUrl already exists in another target.",
         );
       }
       activeGroup.targetBaseUrl = normalized;
@@ -362,7 +362,7 @@ export class RuntimeStore {
       throw new AppError(400, "targetBaseUrl must be a valid HTTP/HTTPS URL.");
     }
     if (this.hasTargetConflict(normalizedTarget)) {
-      throw new AppError(409, "targetBaseUrl already exists in another group.");
+      throw new AppError(409, "targetBaseUrl already exists in another target.");
     }
 
     const nextGroup = createGroup(
@@ -399,7 +399,7 @@ export class RuntimeStore {
   ): { group: ProxyGroup; config: ProxyConfig } {
     const group = this.findGroupById(groupId);
     if (!group) {
-      throw new AppError(404, "group not found.");
+      throw new AppError(404, "target not found.");
     }
 
     const hasName = typeof payload.name === "string";
@@ -434,7 +434,7 @@ export class RuntimeStore {
       ) {
         throw new AppError(
           409,
-          "targetBaseUrl already exists in another group.",
+          "targetBaseUrl already exists in another target.",
         );
       }
       group.targetBaseUrl = normalizedTarget;
@@ -464,7 +464,7 @@ export class RuntimeStore {
       (group) => group.id === groupId,
     );
     if (groupIndex === -1) {
-      throw new AppError(404, "group not found.");
+      throw new AppError(404, "target not found.");
     }
 
     const removedHistory = this.historyByGroup.get(groupId) ?? [];
@@ -478,7 +478,7 @@ export class RuntimeStore {
         normalizeTargetBaseUrl(this.deps.config.defaultTargetBaseUrl) ??
         "http://localhost:8080";
       const fallbackGroup = createGroup(
-        "默认分组",
+        "默认转发地址",
         fallbackTarget,
         this.deps.randomUUID,
       );
@@ -519,7 +519,7 @@ export class RuntimeStore {
     const previousRecordCount = this.listGroupHistorySize();
 
     const nextDefaultGroup = createGroup(
-      "默认分组",
+      "默认转发地址",
       fallbackTarget,
       this.deps.randomUUID,
     );

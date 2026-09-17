@@ -8,12 +8,12 @@ import yaml from "highlight.js/lib/languages/yaml";
 import markdown from "highlight.js/lib/languages/markdown";
 import "highlight.js/styles/github.css";
 
-import GroupPicker from "./components/GroupPicker.vue";
+import TargetPicker from "./components/TargetPicker.vue";
 import RuleManagerModal from "./components/RuleManagerModal.vue";
 import ReplayDialog from "./components/ReplayDialog.vue";
 import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
-import GroupFormModal from "./components/GroupFormModal.vue";
+import TargetFormModal from "./components/TargetFormModal.vue";
 import ToastMessages from "./components/ToastMessages.vue";
 import type { ProxyGroup, ProxyHeaders, ProxyRule } from "@proxira/core";
 import { redactHeaders, redactText } from "./utils/redact.js";
@@ -80,17 +80,17 @@ const {
   records,
   recordsTotal,
   recordsLoadingMore,
-  groups,
-  activeGroup,
-  currentGroupId,
+  targets,
+  activeTarget,
+  currentTargetId,
   selectedRecordId,
   connectionState,
   deletingRecordId,
   exporting,
   clearingRecords,
   resettingAll,
-  groupModalSubmitting,
-  deleteGroupSubmitting,
+  targetModalSubmitting,
+  deleteTargetSubmitting,
   rules,
   replaying,
   fetchRules,
@@ -102,10 +102,10 @@ const {
   fetchRecords,
   loadMoreRecords,
   connectSse,
-  switchActiveGroup,
-  createGroup,
-  saveActiveGroup,
-  deleteGroup,
+  switchActiveTarget,
+  createTarget,
+  saveActiveTarget,
+  deleteTarget,
   removeRecord,
   exportRecords: exportRecordsRequest,
   clearRecords,
@@ -125,13 +125,13 @@ const activeDetailTab = ref<DetailTab>("response-body");
 const requestBodyExpanded = ref(false);
 const responseBodyExpanded = ref(false);
 
-const groupModalOpen = ref(false);
-const groupModalMode = ref<"create" | "edit">("create");
-const modalGroupName = ref("");
+const targetModalOpen = ref(false);
+const targetModalMode = ref<"create" | "edit">("create");
+const modalTargetName = ref("");
 const modalTargetBaseUrl = ref("");
 const modalUpstreamTimeoutMs = ref<number | null>(null);
-const deleteGroupModalOpen = ref(false);
-const pendingDeleteGroup = ref<ProxyGroup | null>(null);
+const deleteTargetModalOpen = ref(false);
+const pendingDeleteTarget = ref<ProxyGroup | null>(null);
 const resetModalOpen = ref(false);
 
 const filteredRecords = computed(() =>
@@ -196,18 +196,18 @@ const connectionLabel = computed(() => {
 });
 
 const modalTitle = computed(() =>
-  groupModalMode.value === "create" ? "新增分组" : "编辑当前分组",
+  targetModalMode.value === "create" ? "新增转发地址" : "编辑当前转发地址",
 );
 const modalDesc = computed(() =>
-  groupModalMode.value === "create"
-    ? "请输入新分组的名称和唯一转发地址。创建后不会自动切换，当前请求仍走现有分组。"
-    : "修改当前分组的名称与转发地址，地址仍需保持唯一。",
+  targetModalMode.value === "create"
+    ? "请输入新转发地址的名称和唯一地址。创建后不会自动切换，当前请求仍走现有地址。"
+    : "修改当前转发地址的名称与地址，地址仍需保持唯一。",
 );
 const modalSubmitText = computed(() =>
-  groupModalMode.value === "create" ? "创建分组" : "保存分组",
+  targetModalMode.value === "create" ? "创建转发地址" : "保存转发地址",
 );
 const resetConfirmTips = [
-  "会删除所有分组配置，仅保留一个默认分组。",
+  "会删除所有转发地址配置，仅保留一个默认转发地址。",
   "会清空全部历史请求记录。",
   "操作不可撤销，请确认当前数据已无需保留。",
 ];
@@ -329,90 +329,90 @@ const updateSortMode = (value: string): void => {
   }
 };
 
-const onGroupSelect = (nextGroupId: string): void => {
-  void switchActiveGroup(nextGroupId);
+const onTargetSelect = (nextTargetId: string): void => {
+  void switchActiveTarget(nextTargetId);
 };
 
 const onSelectRecord = (recordId: string): void => {
   selectedRecordId.value = recordId;
 };
 
-const openCreateGroupModal = (): void => {
-  groupModalMode.value = "create";
-  modalGroupName.value = "";
+const openCreateTargetModal = (): void => {
+  targetModalMode.value = "create";
+  modalTargetName.value = "";
   modalTargetBaseUrl.value = "";
   modalUpstreamTimeoutMs.value = null;
-  groupModalOpen.value = true;
+  targetModalOpen.value = true;
 };
 
-const openEditGroupModal = (): void => {
-  const group = activeGroup.value;
-  if (!group) {
-    pushToast("当前没有可编辑的分组", "error");
+const openEditTargetModal = (): void => {
+  const target = activeTarget.value;
+  if (!target) {
+    pushToast("当前没有可编辑的转发地址", "error");
     return;
   }
 
-  groupModalMode.value = "edit";
-  modalGroupName.value = group.name;
-  modalTargetBaseUrl.value = group.targetBaseUrl;
-  modalUpstreamTimeoutMs.value = group.upstreamTimeoutMs ?? null;
-  groupModalOpen.value = true;
+  targetModalMode.value = "edit";
+  modalTargetName.value = target.name;
+  modalTargetBaseUrl.value = target.targetBaseUrl;
+  modalUpstreamTimeoutMs.value = target.upstreamTimeoutMs ?? null;
+  targetModalOpen.value = true;
 };
 
-const closeGroupModal = (): void => {
-  if (groupModalSubmitting.value) {
+const closeTargetModal = (): void => {
+  if (targetModalSubmitting.value) {
     return;
   }
-  groupModalOpen.value = false;
+  targetModalOpen.value = false;
 };
 
-const submitGroupModal = async (payload: {
+const submitTargetModal = async (payload: {
   name: string;
   targetBaseUrl: string;
   upstreamTimeoutMs: number | null;
 }): Promise<void> => {
   const succeeded =
-    groupModalMode.value === "create"
-      ? await createGroup(payload.name, payload.targetBaseUrl, payload.upstreamTimeoutMs)
-      : await saveActiveGroup(
+    targetModalMode.value === "create"
+      ? await createTarget(payload.name, payload.targetBaseUrl, payload.upstreamTimeoutMs)
+      : await saveActiveTarget(
           payload.name,
           payload.targetBaseUrl,
           payload.upstreamTimeoutMs,
         );
   if (succeeded) {
-    groupModalOpen.value = false;
+    targetModalOpen.value = false;
   }
 };
 
-const openDeleteGroupModal = (groupId: string): void => {
-  const targetGroup = groups.value.find((group) => group.id === groupId) ?? null;
-  if (!targetGroup) {
-    pushToast("分组不存在，无法删除", "error");
+const openDeleteTargetModal = (groupId: string): void => {
+  const targetEntry = targets.value.find((entry) => entry.id === groupId) ?? null;
+  if (!targetEntry) {
+    pushToast("转发地址不存在，无法删除", "error");
     return;
   }
 
-  pendingDeleteGroup.value = targetGroup;
-  deleteGroupModalOpen.value = true;
+  pendingDeleteTarget.value = targetEntry;
+  deleteTargetModalOpen.value = true;
 };
 
-const closeDeleteGroupModal = (): void => {
-  if (deleteGroupSubmitting.value) {
+const closeDeleteTargetModal = (): void => {
+  if (deleteTargetSubmitting.value) {
     return;
   }
-  deleteGroupModalOpen.value = false;
-  pendingDeleteGroup.value = null;
+  deleteTargetModalOpen.value = false;
+  pendingDeleteTarget.value = null;
 };
 
-const confirmDeleteGroup = async (): Promise<void> => {
-  const targetGroup = pendingDeleteGroup.value;
-  if (!targetGroup) {
+const confirmDeleteTarget = async (): Promise<void> => {
+  const targetEntry = pendingDeleteTarget.value;
+  if (!targetEntry) {
     return;
   }
 
-  const succeeded = await deleteGroup(targetGroup);
+  const succeeded = await deleteTarget(targetEntry);
   if (succeeded) {
-    deleteGroupModalOpen.value = false;
-    pendingDeleteGroup.value = null;
+    deleteTargetModalOpen.value = false;
+    pendingDeleteTarget.value = null;
   }
 };
 
@@ -585,22 +585,21 @@ onBeforeUnmount(() => {
 
     <section class="workspace">
       <aside class="left-column">
-        <section class="card group-hub">
-          <div class="group-hub-row">
-            <GroupPicker
-              class="group-hub-picker"
-              :groups="groups"
-              :model-value="currentGroupId"
-              @update:modelValue="onGroupSelect"
-              @request-delete="openDeleteGroupModal"
+        <section class="card target-hub">
+          <div class="target-hub-row">
+            <TargetPicker
+              class="target-hub-picker"
+              :targets="targets"
+              :model-value="currentTargetId"
+              @update:modelValue="onTargetSelect"
             />
-            <div class="group-hub-actions">
+            <div class="target-hub-actions">
               <button
                 class="round-icon-button"
                 type="button"
-                aria-label="新增分组"
-                data-tooltip="新增分组"
-                @click="openCreateGroupModal"
+                aria-label="新增转发地址"
+                data-tooltip="新增转发地址"
+                @click="openCreateTargetModal"
               >
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M10.9 4a.9.9 0 1 0-1.8 0v5.1H4a.9.9 0 0 0 0 1.8h5.1V16a.9.9 0 0 0 1.8 0v-5.1H16a.9.9 0 1 0 0-1.8h-5.1V4Z" />
@@ -609,15 +608,29 @@ onBeforeUnmount(() => {
               <button
                 class="round-icon-button"
                 type="button"
-                :disabled="!activeGroup"
-                aria-label="编辑当前分组"
-                data-tooltip="编辑当前分组"
-                @click="openEditGroupModal"
+                :disabled="!activeTarget"
+                aria-label="编辑当前转发地址"
+                data-tooltip="编辑当前转发地址"
+                @click="openEditTargetModal"
               >
                 <svg viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M14.7 2.8a2.2 2.2 0 0 1 3.1 3.1L8.4 15.4l-3.6.5.5-3.6 9.4-9.5Zm1.8 1.3a.4.4 0 0 0-.6 0l-1 1 1.9 1.9 1-1a.4.4 0 0 0 0-.6l-1.3-1.3ZM13.6 6.4 6.9 13l-.2 1.2 1.2-.2 6.6-6.7-1.9-1.9Z" />
                 </svg>
               </button>
+              <button
+                class="round-icon-button"
+                type="button"
+                data-tone="danger"
+                :disabled="!activeTarget"
+                aria-label="删除当前转发地址"
+                data-tooltip="删除当前转发地址"
+                @click="openDeleteTargetModal(currentTargetId)"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M7.5 2.5h5l.8 1.5H17a.9.9 0 1 1 0 1.8h-.9l-.7 10.2a1.8 1.8 0 0 1-1.8 1.7H6.4a1.8 1.8 0 0 1-1.8-1.7L3.9 5.8H3a.9.9 0 1 1 0-1.8h3.7l.8-1.5Zm-1.8 3.3.7 10.1h7.2l.7-10.1H5.7Zm2.1 1.6c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Zm4.4 0c.5 0 .9.4.9.9v5a.9.9 0 1 1-1.8 0v-5c0-.5.4-.9.9-.9Z" />
+                </svg>
+              </button>
+              <span class="target-hub-divider" aria-hidden="true"></span>
               <button
                 class="round-icon-button"
                 type="button"
@@ -1118,27 +1131,27 @@ onBeforeUnmount(() => {
     </section>
 
     <ToastMessages :messages="toastMessages" @dismiss="dismissToast" />
-    <GroupFormModal
-      :open="groupModalOpen"
+    <TargetFormModal
+      :open="targetModalOpen"
       :title="modalTitle"
       :description="modalDesc"
       :submit-text="modalSubmitText"
-      :loading="groupModalSubmitting"
-      :initial-name="modalGroupName"
+      :loading="targetModalSubmitting"
+      :initial-name="modalTargetName"
       :initial-target-base-url="modalTargetBaseUrl"
       :initial-upstream-timeout-ms="modalUpstreamTimeoutMs"
-      @close="closeGroupModal"
-      @submit="submitGroupModal"
+      @close="closeTargetModal"
+      @submit="submitTargetModal"
     />
     <ConfirmDialog
-      :open="deleteGroupModalOpen"
-      title="确认删除分组"
-      :message="`将删除分组「${pendingDeleteGroup?.name ?? ''}」，并清除该分组下的所有历史请求数据。此操作不可恢复。`"
+      :open="deleteTargetModalOpen"
+      title="确认删除转发地址"
+      :message="`将删除转发地址「${pendingDeleteTarget?.name ?? ''}」，并清除该转发地址下的所有历史请求数据。此操作不可恢复。`"
       confirm-text="确认删除"
-      :loading="deleteGroupSubmitting"
+      :loading="deleteTargetSubmitting"
       :danger="true"
-      @close="closeDeleteGroupModal"
-      @confirm="confirmDeleteGroup"
+      @close="closeDeleteTargetModal"
+      @confirm="confirmDeleteTarget"
     />
     <ConfirmDialog
       :open="resetModalOpen"

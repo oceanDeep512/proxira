@@ -13,7 +13,7 @@ describe("createApp", () => {
     expect(config.status).toBe(200);
     expect(await config.json()).toMatchObject({
       targetBaseUrl: "http://upstream.test",
-      groups: [{ name: "默认分组" }],
+      groups: [{ name: "默认转发地址" }],
     });
 
     const status = await app.request("/_proxira/api/status");
@@ -33,7 +33,10 @@ describe("createApp", () => {
       body: JSON.stringify({}),
     });
     expect(invalid.status).toBe(400);
-    expect(await invalid.json()).toEqual({ message: "Invalid request." });
+    // The validation failure must name the reason, not just say "Invalid request.".
+    expect(await invalid.json()).toEqual({
+      message: expect.stringContaining("activeGroupId or targetBaseUrl is required."),
+    });
 
     const initialConfig = await (
       await app.request("/_proxira/api/config")
@@ -96,6 +99,48 @@ describe("createApp", () => {
       removed: true,
       id: createdPayload.group.id,
     });
+  });
+
+  // Guards the wire contract of the endpoint the dashboard's target picker
+  // calls. Renaming UI copy to "转发地址" must never touch these JSON keys —
+  // a renamed key is invisible to the type checker, so it needs a test.
+  it("switches the active target via PUT /config using the activeGroupId key", async () => {
+    const { app } = await createTestApp();
+
+    const initial = await (await app.request("/_proxira/api/config")).json();
+
+    const created = await app.request("/_proxira/api/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "切换目标",
+        targetBaseUrl: "http://switch.test",
+        switchToNew: false,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const spawned = await created.json();
+    // Creating must not hijack live traffic.
+    expect(spawned.config.activeGroupId).toBe(initial.activeGroupId);
+
+    const switched = await app.request("/_proxira/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ activeGroupId: spawned.group.id }),
+    });
+    expect(switched.status).toBe(200);
+    expect((await switched.json()).activeGroupId).toBe(spawned.group.id);
+
+    // A renamed key must fail loudly rather than be silently ignored.
+    const renamed = await app.request("/_proxira/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ activeTargetId: spawned.group.id }),
+    });
+    expect(renamed.status).toBe(400);
+    expect((await renamed.json()).message).toContain(
+      "activeGroupId or targetBaseUrl is required.",
+    );
   });
 
   it("forwards prefixed proxy requests, records history, and exports records", async () => {

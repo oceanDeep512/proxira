@@ -30,12 +30,27 @@
   --scroll-thumb: color-mix(in srgb, var(--accent) 58%, var(--line-strong));
   --scroll-thumb-hover: color-mix(in srgb, var(--accent-strong) 82%, var(--line-strong));
 
-  --radius-lg: 18px;
+  --radius-lg: 16px;
   --radius-md: 12px;
-  --radius-sm: 10px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
 
-  --shadow-flat: 0 1px 0 rgba(17, 45, 74, 0.1);
-  --shadow-soft: 0 16px 36px rgba(29, 57, 91, 0.09);
+  /* 间距刻度：外层 12 / 面板 12 / 内卡 10 / 控件 8 的统一节奏 */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 16px;
+
+  /* 控件高度刻度 */
+  --control-h: 36px;
+  --control-h-compact: 30px;
+  --control-h-mini: 24px;
+
+  --shadow-flat: 0 1px 2px rgba(17, 45, 74, 0.08);
+  --shadow-soft: 0 20px 44px -16px rgba(29, 57, 91, 0.16);
 
   --font-body: "Sora", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
   --font-display: "Barlow Condensed", "Noto Sans SC", sans-serif;
@@ -73,8 +88,8 @@
     --scroll-thumb: color-mix(in srgb, #6bb6ff 70%, #2d4f7a);
     --scroll-thumb-hover: color-mix(in srgb, #9bd0ff 86%, #3f6ea6);
 
-    --shadow-flat: 0 1px 0 rgba(10, 16, 24, 0.55);
-    --shadow-soft: 0 16px 34px rgba(4, 10, 18, 0.38);
+    --shadow-flat: 0 1px 2px rgba(10, 16, 24, 0.5);
+    --shadow-soft: 0 20px 44px -16px rgba(4, 10, 18, 0.5);
   }
 }
 
@@ -106,19 +121,19 @@ body::before {
   background-image:
     linear-gradient(to right, color-mix(in srgb, var(--line) 30%, transparent) 1px, transparent 1px),
     linear-gradient(to bottom, color-mix(in srgb, var(--line) 26%, transparent) 1px, transparent 1px);
-  background-size: 28px 28px;
+  background-size: 32px 32px;
   mask-image: radial-gradient(circle at 30% 10%, black 22%, transparent 78%);
-  opacity: 0.55;
+  opacity: 0.42;
 }
 
 .dashboard {
   width: 100%;
   min-height: 100vh;
-  padding: clamp(12px, 2vw, 20px);
+  padding: clamp(12px, 1.8vw, 18px);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
+  gap: 12px;
   position: relative;
   z-index: 1;
 }
@@ -126,7 +141,7 @@ body::before {
 .card {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   box-shadow: var(--shadow-flat), var(--shadow-soft);
   animation: rise-in 280ms ease both;
 }
@@ -209,8 +224,8 @@ body::before {
 
 .list-tools {
   display: grid;
-  gap: 7px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .list-search {
@@ -290,7 +305,7 @@ body::before {
   margin: 6px 0 0;
   padding: 6px 8px;
   border: 1px dashed color-mix(in srgb, var(--error) 40%, var(--line));
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--error) 8%, var(--surface-soft));
 }
 
@@ -302,8 +317,8 @@ body::before {
 }
 
 .round-icon-button {
-  width: 38px;
-  height: 38px;
+  width: var(--control-h);
+  height: var(--control-h);
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface-soft);
@@ -342,6 +357,12 @@ body::before {
   transform: none;
 }
 
+.round-icon-button[data-tone="danger"]:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--error) 52%, var(--line));
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 10%, var(--surface-soft));
+}
+
 .round-icon-button[data-tooltip]::before {
   content: attr(data-tooltip);
   position: absolute;
@@ -352,7 +373,7 @@ body::before {
   pointer-events: none;
   min-width: max-content;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   border: 1px solid color-mix(in srgb, var(--line-strong) 65%, var(--line));
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   color: var(--text);
@@ -387,7 +408,7 @@ body::before {
 }
 
 .button {
-  min-height: 38px;
+  min-height: var(--control-h);
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   background: var(--accent);
@@ -457,7 +478,7 @@ body::before {
   min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .right-column {
@@ -466,25 +487,36 @@ body::before {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.group-hub {
-  padding: 10px;
+.target-hub {
+  padding: 12px;
 }
 
-.group-hub-row {
+/* 选择器独占一行，功能按钮单独拆到下一行：
+   侧栏最窄只有 260px，按钮组若与选择器同行会挤掉选择器一半以上宽度 */
+.target-hub-row {
+  display: grid;
+  gap: 10px;
+}
+
+.target-hub-picker {
+  min-width: 0;
+}
+
+.target-hub-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.group-hub-picker {
-  min-width: 0;
-  flex: 1;
-}
-
-.group-hub-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.target-hub-divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  border-radius: 1px;
+  background: var(--line);
 }
 
 .list-panel,
@@ -492,7 +524,7 @@ body::before {
   min-height: 0;
   display: grid;
   overflow: hidden;
-  padding: 10px;
+  padding: 12px;
 }
 
 .list-panel {
@@ -508,7 +540,7 @@ body::before {
 }
 
 .panel-head {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -523,7 +555,7 @@ body::before {
 
 .empty {
   margin: 0;
-  padding: 12px;
+  padding: 14px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
@@ -613,7 +645,7 @@ body::before {
 .record-item {
   position: relative;
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: 9px 12px;
   cursor: pointer;
   transition: background-color 120ms ease;
 }
@@ -630,8 +662,8 @@ body::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 9px;
-  bottom: 9px;
+  top: 10px;
+  bottom: 10px;
   width: 3px;
   border-radius: 999px;
   background: var(--accent);
@@ -837,7 +869,7 @@ body::before {
 
 .record-tag {
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--text-soft) 16%, transparent);
   color: var(--text-soft);
   font-size: 10px;
@@ -856,7 +888,7 @@ body::before {
   min-height: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 10px;
 }
 
 .detail-tabs {
@@ -881,7 +913,7 @@ body::before {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 7px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
@@ -987,7 +1019,7 @@ body::before {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
-  padding: 8px;
+  padding: 10px;
 }
 
 .detail-card-head {
@@ -1069,7 +1101,7 @@ body::before {
   margin: 0;
   padding: 7px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-mono);
@@ -1081,7 +1113,7 @@ body::before {
 
 .table-view {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   overflow: hidden;
 }
@@ -1128,7 +1160,7 @@ body::before {
 
 .rich-preview {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   padding: 10px;
@@ -1145,7 +1177,7 @@ body::before {
 
 .raw-source {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-soft) 82%, var(--surface));
   overflow: hidden;
 }
@@ -1168,7 +1200,7 @@ body::before {
 
 .json-view {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   padding: 6px;
   font-size: 11px;
@@ -1222,7 +1254,7 @@ body::before {
 /* Highlight.js customization */
 .detail-card pre.hljs {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-mono);
@@ -1420,10 +1452,6 @@ body::before {
     gap: 10px;
   }
 
-  .group-hub-row {
-    flex-wrap: wrap;
-  }
-
   .button,
   .panel-button,
   .topbar-action-button {
@@ -1435,11 +1463,6 @@ body::before {
   .detail-head-row {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .group-hub-actions {
-    width: 100%;
-    justify-content: flex-end;
   }
 
   .title-note {

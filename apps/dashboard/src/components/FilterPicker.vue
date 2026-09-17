@@ -338,7 +338,7 @@ onBeforeUnmount(() => {
 .filter-option {
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   padding: 8px;

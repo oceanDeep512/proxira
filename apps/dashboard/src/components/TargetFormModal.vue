@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
-type GroupFormPayload = {
+type TargetFormPayload = {
   name: string;
   targetBaseUrl: string;
   upstreamTimeoutMs: number | null;
@@ -20,7 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  submit: [payload: GroupFormPayload];
+  submit: [payload: TargetFormPayload];
 }>();
 
 const name = ref("");
@@ -76,9 +76,13 @@ const onSubmit = (): void => {
     return;
   }
 
-  const parsedTimeout = Number(timeoutMs.value.trim());
+  // Vue's v-model on <input type="number"> already casts the value with
+  // looseToNumber, so timeoutMs can hold a number once the user types into
+  // the field. Normalize through String() first or .trim() would throw.
+  const rawTimeout = String(timeoutMs.value ?? "").trim();
+  const parsedTimeout = Number(rawTimeout);
   const upstreamTimeoutMs =
-    timeoutMs.value.trim().length > 0 && Number.isFinite(parsedTimeout) && parsedTimeout > 0
+    rawTimeout.length > 0 && Number.isFinite(parsedTimeout) && parsedTimeout > 0
       ? Math.floor(parsedTimeout)
       : null;
 
@@ -103,12 +107,12 @@ const onSubmit = (): void => {
           <p class="modal-desc">{{ description }}</p>
 
           <div class="modal-field">
-            <label class="modal-label">分组名称</label>
+            <label class="modal-label">名称</label>
             <input
               v-model="name"
               class="modal-input"
               type="text"
-              placeholder="请输入分组名称（必填）"
+              placeholder="请输入名称（必填）"
             />
           </div>
 
