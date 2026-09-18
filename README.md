@@ -30,6 +30,9 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 - 详情复制：一键复制 URL、Headers、Body、cURL。
 - HTTPS 本地调试：支持一键生成自签名证书并启用 HTTPS。
 - 多格式展示：JSON / XML / YAML / HTML / CSV / Markdown / Text。
+- 逐层折叠：JSON 对象/数组带折叠三角可一键收起；SSE 响应按帧折叠，支持逐帧展开与「全部折叠/全部展开」。
+- 局域网共享：启动时打印可直接发给同事的 `Network` 地址（仅当监听地址真的对外可达时才展示）。
+- 窄屏自适应：窗口收窄后标题与转发地址同行、历史请求折叠为下拉菜单（整行可点，折叠态右侧显示当前选中请求），内容区跟随父盒子缩放并横向滚动。
 - 拦截规则：按路径/方法匹配后执行 Mock、模拟错误、延迟、流式中断、响应截断。
 - 请求重放：改完参数直接重发上游，并与原响应做逐行差异对比。
 - 敏感信息脱敏：`authorization` / `cookie` / `api_key` 等默认打码，一键切换原文。
@@ -98,7 +101,7 @@ pnpm run release            # 发版并发布到 npm（注意要带 run）
 npx proxira@latest
 
 # 固定版本使用（便于团队复现）
-npx proxira@0.2.1
+npx proxira@0.2.2
 
 # 全局安装
 npm i -g proxira
@@ -254,6 +257,18 @@ proxira migrate-data --from /some/.proxira  # 指定旧目录迁移
 | `pnpm run release` | patch 版本号 + 发布到 npm |
 | `pnpm run release:minor` / `release:major` | minor / major 版本号 + 发布 |
 
+> [!TIP]
+> **dev 模式请用环境变量调参，CLI 参数无效**：`pnpm dev` 跑的是 `src/index.ts`（不是 `cli.ts`），
+> 而 `-p` / `-t` / `--host` 等参数只在 `cli.ts` 里解析（`cli.ts` 的工作就是把参数转成环境变量再启动服务）。
+> 想改端口／上游就写环境变量：
+>
+> ```bash
+> PORT=4000 pnpm dev
+> PORT=4000 PROXY_TARGET_URL=http://127.0.0.1:8080 pnpm dev:server
+> ```
+>
+> 完整对照见下方「环境变量」表。
+
 > [!WARNING]
 > 不要直接敲 `pnpm pack` / `pnpm publish` —— 这两个是 **pnpm 内置命令**，作用于根目录自身（本仓库根包名为
 > `proxira-monorepo` 且 `private: true`），不会带上 `run`。发布一律走上面的 `pnpm run pack:app` / `pnpm run release`。
@@ -393,3 +408,23 @@ pnpm --filter @proxira/dashboard build
 
 > [!WARNING]
 > 默认会记录请求与响应正文，请在真实数据联调时注意敏感信息处理。
+
+## 更新日志
+
+### 0.2.2
+
+面板体验与自适应（本版本全部为面板/CLI 输出改进，接口与数据格式无破坏性变更）：
+
+- **JSON 折叠**：对象/数组左侧带折叠三角（`vue-json-pretty` 默认不渲染图标，已用 `JsonView` 组件统一开启）。
+- **SSE 逐帧折叠**：SSE 响应按帧展示，点标题行收起/展开单帧，另有「全部折叠 / 全部展开」。
+- **局域网地址**：启动横幅新增 `Network` 行，打印可直接发给同事的地址；监听 `127.0.0.1` 时不会给出打不开的 URL。
+- **窄屏自适应**：≤960px 时标题与转发地址同行、历史请求折叠为可点菜单（整行热区，折叠态右侧显示当前选中请求）；
+  内容区不再固定宽度，跟随父盒子缩放，超宽时容器内部横向滚动。
+- **细节修正**：按钮文案强制单行；窄屏「清除 / 导出 JSON」回到同一行；折叠三角 hover 不再用背景块遮挡文字；
+  tooltip 隐藏态不再撑出整页横向滚动条；详情区操作按钮固定在右侧并跟随父盒宽度。
+- **工程修正**：清掉根 `dev` 与 `start` 脚本里残留的 `-p 3030 -h`（会让面板 dev server 打印帮助后直接退出）。
+
+### 0.2.1
+
+- 分组改名为「转发地址」（仅展示层，wire 契约不变）。
+- 新增转发地址级超时、拦截规则、请求重放与差异对比、敏感信息脱敏、访问令牌。
