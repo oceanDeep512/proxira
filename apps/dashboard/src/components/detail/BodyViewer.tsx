@@ -177,10 +177,6 @@ export const BodyViewer = ({
             {contentType}
           </Pill>
         ) : null}
-        <span className="font-mono text-[11px] text-fg-dim">{formatBytes(sizeBytes)}</span>
-        {rawText ? (
-          <span className="font-mono text-[11px] text-fg-dim">{lineCount} 行</span>
-        ) : null}
 
         <div className="ml-auto flex items-center gap-1.5">
           {BODY_SEARCH_ENABLED ? (
@@ -283,9 +279,18 @@ export const BodyViewer = ({
         </ViewerFrame>
       ) : activeMode === "raw" ? rawNode : null}
 
-      {view.note && view.mode !== "empty" && !view.truncated ? (
-        <p className="m-0 text-[11px] leading-snug text-fg-dim">{view.note}</p>
-      ) : null}
+      {/* 底部信息条：note 在左，大小 / 行数在右。
+          原来它们和格式、content-type 一起挤在顶部，切视图时那一行内容会变；
+          挪下来后顶部只剩格式标识 + 视图切换，更稳。 */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {view.note && view.mode !== "empty" && !view.truncated ? (
+          <p className="m-0 min-w-0 text-[11px] leading-snug text-fg-dim">{view.note}</p>
+        ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[11px] text-fg-dim">
+          <span>{formatBytes(sizeBytes)}</span>
+          {rawText ? <span>{lineCount} 行</span> : null}
+        </div>
+      </div>
     </div>
   );
 };
