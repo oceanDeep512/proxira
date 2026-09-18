@@ -23,7 +23,7 @@ npx proxira
 npx proxira
 
 # 固定版本
-npx proxira@0.3.0
+npx proxira@0.3.1
 
 # 全局安装
 npm i -g proxira
@@ -153,15 +153,19 @@ Dashboard: http://192.168.1.4:3000/_proxira/ui
 | `PROXY_ACCESS_TOKEN` | 内部 API / SSE 访问令牌 | - |
 | `PROXY_HTTPS_ENABLED` | 启用 HTTPS 服务模式 | 未设置 |
 
+## 能力边界
+
+- **不支持 WebSocket 及其他 HTTP Upgrade 协议**：握手请求返回 `501`、不转发、面板记录写明原因。
+  调试 WebSocket 请让客户端直连上游。
+- **不做系统代理接管**：只监听自己的端口，需要你在客户端里把请求地址指过去，不会改写系统网络设置。
+- **不解密 HTTPS 上游**：`--https` 是让「客户端 → 代理」这一段走 HTTPS（自签名证书），
+  代理 → 上游仍按上游本身的协议原样转发。
+- **定位是本地开发调试工具**：面板能看完整正文、也能改上游地址，请勿直接暴露公网；
+  `--host` 开放到局域网时请只在可信网络里用，必要时加 `--token`。
+
 ## 注意事项
 
-> [!WARNING]
-> **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发基于 `fetch()`，无法完成协议切换，
-> 握手请求会被**显式拒绝**：返回 `501 Not Implemented`、不转发、面板记录写明原因。
-> 调试 WebSocket 请让客户端直连上游。
-
 > [!NOTE]
-> - 定位是本地开发调试工具，请勿直接暴露公网。
 > - 默认只监听 `127.0.0.1`，其他电脑连不上；需要局域网访问用 `proxira --host`（不带值即 `lan`）。
 > - 默认会记录完整请求/响应正文，联调真实数据请注意敏感信息。
 > - 非流式正文超过 `PROXY_MAX_BODY_CAPTURE_BYTES` 才截断（只截记录，转发始终完整）；
@@ -191,7 +195,7 @@ Dashboard: http://192.168.1.4:3000/_proxira/ui
 
 ## 更多
 
-开发、测试、发布与完整更新日志见仓库根目录 README：
+开发、测试、发布与架构说明见仓库根目录 README：
 <https://github.com/oceanDeep512/proxira#readme>
 
 ## License
