@@ -27,6 +27,13 @@ type BodyMode = "tree" | "sse" | "table" | "preview" | "raw";
 // 单次渲染的兜底：再大的正文也先折叠，避免点开一条就把标签页卡住。
 const LARGE_BYTES = 96 * 1024;
 
+/**
+ * 正文内搜索的开关：目前关闭，改用浏览器自带的 ⌘F / Ctrl+F。
+ * 想恢复就把它改成 true —— 搜索框、命中高亮、上/下一个定位的代码都还在，
+ * 只是不渲染输入框、也不再拦截 ⌘F。
+ */
+const BODY_SEARCH_ENABLED = false;
+
 export const BodyViewer = ({
   view,
   contentType,
@@ -83,7 +90,9 @@ export const BodyViewer = ({
   const tooLarge = sizeBytes > LARGE_BYTES && !expanded;
 
   // 和浏览器控制台一致：⌘F / Ctrl+F 直接聚焦正文搜索框，Esc 清空退出。
+  // 搜索关掉时这里必须早退，否则会抢掉浏览器自带的查找。
   useEffect(() => {
+    if (!BODY_SEARCH_ENABLED) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       const input = searchRef.current;
       if (!input) return;
@@ -176,31 +185,33 @@ export const BodyViewer = ({
         ) : null}
 
         <div className="ml-auto flex items-center gap-1.5">
-          <label className="relative flex items-center">
-            <Search className="pointer-events-none absolute left-2 size-3 text-fg-dim" />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setQuery("");
-                  event.currentTarget.blur();
-                }
-              }}
-              placeholder="搜索内容…"
-              aria-label={`在${copyLabel}中搜索`}
-              className={cn(
-                "h-7 w-[130px] rounded-full border border-line bg-surface-2 pl-6 pr-2",
-                "text-[12px] placeholder:text-fg-dim",
-                "focus:w-[180px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft",
-                "transition-[width,border-color] duration-150",
-              )}
-            />
-          </label>
+          {BODY_SEARCH_ENABLED ? (
+            <label className="relative flex items-center">
+              <Search className="pointer-events-none absolute left-2 size-3 text-fg-dim" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setQuery("");
+                    event.currentTarget.blur();
+                  }
+                }}
+                placeholder="搜索内容…"
+                aria-label={`在${copyLabel}中搜索`}
+                className={cn(
+                  "h-7 w-[130px] rounded-full border border-line bg-surface-2 pl-6 pr-2",
+                  "text-[12px] placeholder:text-fg-dim",
+                  "focus:w-[180px] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft",
+                  "transition-[width,border-color] duration-150",
+                )}
+              />
+            </label>
+          ) : null}
 
-          {/* 复制/下载已移进内容面板顶部菜单，这里只留搜索与视图切换，切视图不再跳布局 */}
+          {/* 复制/下载已移进内容面板顶部菜单，这里只留视图切换，切视图不再跳布局 */}
           {options.length > 1 ? (
             <Segmented
               ariaLabel={`${copyLabel} 视图`}
