@@ -55,8 +55,8 @@ export const validateHost = (
         message:
           `监听地址 ${value} 不是本机的网卡地址。` +
           (lanAddresses.length > 0
-            ? `本机可用：${lanAddresses.join("、")}；想让局域网其他设备访问用 --host lan。`
-            : "未检测到局域网地址；想让局域网其他设备访问用 --host lan。"),
+            ? `本机可用：${lanAddresses.join("、")}；想让局域网其他设备访问用 --host（不带值即可）。`
+            : "未检测到局域网地址；想让局域网其他设备访问用 --host（不带值即可）。"),
       };
     }
     return { ok: true };
@@ -68,7 +68,7 @@ export const validateHost = (
     ok: false,
     message:
       `监听地址 "${host}" 无效。可用写法：--host 127.0.0.1（仅本机）、` +
-      `--host 0.0.0.0 或 --host lan（局域网可访问）、--host <本机 IP>。`,
+      `--host（不带值，等同 lan / 0.0.0.0，局域网可访问）、--host <本机 IP>。`,
   };
 };
 

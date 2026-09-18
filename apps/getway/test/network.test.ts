@@ -154,7 +154,7 @@ describe("network", () => {
       if (!result.ok) {
         // The message must be actionable, not just "invalid".
         expect(result.message).toContain("192.168.1.23");
-        expect(result.message).toContain("--host lan");
+        expect(result.message).toContain("--host");
       }
     });
 
@@ -162,7 +162,9 @@ describe("network", () => {
       const result = validateHost("abc", lan);
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.message).toContain("--host lan");
+        // 提示里要给出「不带值 --host」这个最短写法。
+        expect(result.message).toContain("--host");
+        expect(result.message).toContain("不带值");
       }
       expect(validateHost("300.1.1.1", lan).ok).toBe(false);
     });

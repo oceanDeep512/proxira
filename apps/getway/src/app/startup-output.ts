@@ -27,7 +27,7 @@ const resolveNetworkInfo = (options: {
     addresses: [],
     hint: isWildcard
       ? "未检测到局域网地址"
-      : `未暴露（当前仅监听 ${host}，加 --host lan 可暴露到局域网）`,
+      : `未暴露（当前仅监听 ${host}，加 --host 可暴露到局域网）`,
   };
 };
 
@@ -195,7 +195,7 @@ const printStartupTips = (
     tips.push(
       `4) 当前只监听 ${chalk.gray(config.host)}，${chalk.yellow(
         "其他电脑连不上这台机器",
-      )}；要让局域网内其他设备访问，用 ${chalk.cyan("proxira --host lan")} 重启`,
+      )}；要让局域网内其他设备访问，重新启动时加上 ${chalk.cyan("--host")} 即可`,
     );
   }
   tips.push(`5) 仅建议本地开发使用，请勿直接暴露到公网`);

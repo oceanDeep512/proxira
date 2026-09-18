@@ -19,6 +19,7 @@ import {
   detectOS,
   getInstallCommand,
   getInstallGuide,
+  resolveHostFlag,
   validateCertDays,
   validateCommonName,
 } from "./cli-utils.js";
@@ -159,10 +160,10 @@ const printHelp = (): void => {
     `${chalk.bold("服务选项")}`,
     `  -p, --port <port>          ${chalk.gray("代理服务端口")} ${chalk.dim("(默认: 3000)")}`,
     `  -t, --target <url>         ${chalk.gray("上游服务地址")} ${chalk.dim("(默认: http://localhost:8080)")}`,
-    `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: 用户级目录，如 ~/Library/Application Support/Proxira)")}`,
-    `      --host <address>       ${chalk.gray("监听地址")} ${chalk.dim("(默认: 127.0.0.1，仅本机)")}`,
-    `                           ${chalk.dim("lan 或 0.0.0.0 = 监听所有网卡，局域网其他设备可访问")}`,
-    `      --token <token>       ${chalk.gray("面板与 API 访问令牌")} ${chalk.dim("(默认: 不启用)")}`,
+    `  -d, --data-dir <path>      ${chalk.gray("数据存储目录")} ${chalk.dim("(默认: 用户级目录)")}`,
+    `      --host [address]       ${chalk.gray("监听地址")} ${chalk.dim("(默认: 127.0.0.1，仅本机)")}`,
+    `                             ${chalk.dim("不带值 = lan：监听所有网卡，局域网设备可访问")}`,
+    `      --token <token>        ${chalk.gray("面板与 API 访问令牌")} ${chalk.dim("(默认: 不启用)")}`,
     "",
     `${chalk.bold("代理选项")}`,
     `  -x, --prefix <path>        ${chalk.gray("自定义代理前缀")} ${chalk.dim("(默认: /proxira)")}`,
@@ -194,9 +195,10 @@ const printHelp = (): void => {
     `  proxira --prefix /debug-proxy --target http://localhost:8080`,
     `  proxira --no-prefix --target http://localhost:8080`,
     "",
-    `${chalk.gray("# 让局域网里其他电脑也能用这台机器上的代理")}`,
+    `${chalk.gray("# 让局域网里其他电脑也能用这台机器上的代理（下面两种写法等价）")}`,
+    `  proxira --host`,
     `  proxira --host lan`,
-    `  ${chalk.dim("# 启动后会打印 http://192.168.x.x:3000/proxira 这样的地址，别的电脑填它即可")}`,
+    `  ${chalk.dim("# 启动后会打印局域网地址，其他电脑填它即可")}`,
     "",
     `${chalk.gray("# HTTPS 模式（自动检测证书）")}`,
     `  proxira gen-cert`,
@@ -387,13 +389,20 @@ const parseFlags = (argv: string[]): CliFlags => {
     }
     if (token === "--host") {
       ensureServeOnly(token);
-      flags.host = readNext(index, token);
-      index += 1;
+      // `--host` 可以不带值：`proxira --host` 就是「开放到局域网」。
+      const resolved = resolveHostFlag(undefined, normalized[index + 1]);
+      flags.host = resolved.value;
+      if (resolved.consumesNext) {
+        index += 1;
+      }
       continue;
     }
     if (token.startsWith("--host=")) {
       ensureServeOnly("--host");
-      flags.host = token.slice("--host=".length);
+      flags.host = resolveHostFlag(
+        token.slice("--host=".length),
+        undefined,
+      ).value;
       continue;
     }
     if (token === "--token") {

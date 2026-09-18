@@ -1,5 +1,7 @@
 export type OSType = "macos" | "windows" | "linux" | "unknown";
 
+import { LAN_HOST_ALIAS } from "./shared/network.js";
+
 export const detectOS = (platform: string): OSType => {
   if (platform === "darwin") return "macos";
   if (platform === "win32") return "windows";
@@ -94,4 +96,27 @@ export const validateCommonName = (commonNameRaw: string | undefined): string =>
     return "localhost";
   }
   return trimmed;
+};
+
+/**
+ * 解析 `--host` 的值：它可以不带值单独使用，`proxira --host` 等价于 `--host lan`
+ * （开放到局域网）。判断是否吃掉下一个 token 的规则是：下一个 token 以 `-`
+ * 开头就说明它是另一个参数，而不是 host 的值。
+ */
+export const resolveHostFlag = (
+  inlineValue: string | undefined,
+  nextToken: string | undefined,
+): { value: string; consumesNext: boolean } => {
+  if (inlineValue !== undefined) {
+    const trimmed = inlineValue.trim();
+    // `--host=` 空值同样按开关处理，不去监听一个空字符串。
+    return {
+      value: trimmed.length > 0 ? trimmed : LAN_HOST_ALIAS,
+      consumesNext: false,
+    };
+  }
+  if (nextToken !== undefined && !nextToken.startsWith("-")) {
+    return { value: nextToken, consumesNext: true };
+  }
+  return { value: LAN_HOST_ALIAS, consumesNext: false };
 };

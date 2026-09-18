@@ -3,6 +3,7 @@ import {
   detectOS,
   getInstallGuide,
   getInstallCommand,
+  resolveHostFlag,
   validateCertDays,
   validateCommonName,
   type OSType,
@@ -130,6 +131,56 @@ describe("cli-utils", () => {
     it("returns valid common name as-is", () => {
       expect(validateCommonName("myapp.local")).toBe("myapp.local");
       expect(validateCommonName("api.example.com")).toBe("api.example.com");
+    });
+  });
+
+  describe("resolveHostFlag", () => {
+    it("treats a bare --host as the lan alias", () => {
+      // `proxira --host` == `proxira --host lan`
+      expect(resolveHostFlag(undefined, undefined)).toEqual({
+        value: "lan",
+        consumesNext: false,
+      });
+    });
+
+    it("does not swallow the next flag as a value", () => {
+      expect(resolveHostFlag(undefined, "--port")).toEqual({
+        value: "lan",
+        consumesNext: false,
+      });
+      expect(resolveHostFlag(undefined, "-p")).toEqual({
+        value: "lan",
+        consumesNext: false,
+      });
+    });
+
+    it("consumes the next token when it really is a value", () => {
+      expect(resolveHostFlag(undefined, "192.168.1.4")).toEqual({
+        value: "192.168.1.4",
+        consumesNext: true,
+      });
+      expect(resolveHostFlag(undefined, "0.0.0.0")).toEqual({
+        value: "0.0.0.0",
+        consumesNext: true,
+      });
+    });
+
+    it("uses the inline value when present", () => {
+      expect(resolveHostFlag("10.0.0.2", undefined)).toEqual({
+        value: "10.0.0.2",
+        consumesNext: false,
+      });
+    });
+
+    it("treats an empty inline value as the lan alias", () => {
+      expect(resolveHostFlag("", undefined)).toEqual({
+        value: "lan",
+        consumesNext: false,
+      });
+      expect(resolveHostFlag("   ", undefined)).toEqual({
+        value: "lan",
+        consumesNext: false,
+      });
     });
   });
 });
