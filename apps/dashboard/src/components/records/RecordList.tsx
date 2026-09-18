@@ -21,6 +21,43 @@ import { cn } from "../../lib/cn";
 
 const ROW_HEIGHT = 62;
 
+/**
+ * 列表的操作组（清除 / 导出）。
+ * 抽出来是因为窄屏下头部会隐藏，这组操作要挪到历史请求对话框的页脚里复用。
+ */
+export const RecordListActions = () => {
+  const groupId = useProxiraStore(selectCurrentTargetId);
+  const clearRecords = useProxiraStore((state) => state.clearRecords);
+  const clearing = useProxiraStore((state) => state.clearingRecords);
+  const exportRecords = useProxiraStore((state) => state.exportRecords);
+  const exporting = useProxiraStore((state) => state.exporting);
+  const methodFilter = useUiStore((state) => state.methodFilter);
+  const statusFilter = useUiStore((state) => state.statusFilter);
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={clearing || !groupId}
+        onClick={() => void clearRecords()}
+      >
+        <RotateCcw className="size-3.5" />
+        {clearing ? "清除中" : "清除"}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={exporting || !groupId}
+        onClick={() => void exportRecords({ method: methodFilter, status: statusFilter })}
+      >
+        <Download className="size-3.5" />
+        {exporting ? "导出中" : "导出"}
+      </Button>
+    </>
+  );
+};
+
 const statusToneMap = {
   success: "success",
   redirect: "info",
@@ -105,7 +142,20 @@ const RecordRow = ({
   );
 };
 
-export const RecordList = ({ isWide }: { isWide: boolean }) => {
+export const RecordList = ({
+  isWide,
+  /** 嵌在对话框里用（窄屏选择器）：恒展开、不渲染折叠标题。 */
+  embedded = false,
+  /** 选中一条后回调，供对话框自动关闭。 */
+  onPicked,
+  /** 窄屏下整块隐藏（改由转发地址那一行里的选择器按钮唤起）。 */
+  className,
+}: {
+  isWide: boolean;
+  embedded?: boolean;
+  onPicked?: () => void;
+  className?: string;
+}) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const records = useProxiraStore((state) => state.records);
@@ -116,11 +166,6 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
   const removeRecord = useProxiraStore((state) => state.removeRecord);
   const deletingRecordId = useProxiraStore((state) => state.deletingRecordId);
   const loadMore = useProxiraStore((state) => state.loadMoreRecords);
-  const clearRecords = useProxiraStore((state) => state.clearRecords);
-  const clearing = useProxiraStore((state) => state.clearingRecords);
-  const exportRecords = useProxiraStore((state) => state.exportRecords);
-  const exporting = useProxiraStore((state) => state.exporting);
-  const groupId = useProxiraStore(selectCurrentTargetId);
 
   const searchText = useUiStore((state) => state.searchText);
   const setSearchText = useUiStore((state) => state.setSearchText);
@@ -152,7 +197,7 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
     overscan: 10,
   });
 
-  const expanded = isWide || listPanelOpen;
+  const expanded = isWide || listPanelOpen || embedded;
   const filtersDirty =
     methodFilter !== "ALL" || statusFilter !== "ALL" || sortMode !== "time_desc" || !!searchText;
 
@@ -166,10 +211,11 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
     <section
       className={cn(
         "px-panel flex min-h-0 min-w-0 w-full flex-1 basis-auto flex-col overflow-hidden",
-        "max-panel:border-b max-panel:border-line",
+        embedded ? "h-full" : "max-panel:border-b max-panel:border-line",
+        className,
       )}
     >
-      <div className="px-panel-head">
+      <div className={cn("px-panel-head", embedded && "hidden")}>
         <button
           type="button"
           onClick={() => setListPanelOpen(!listPanelOpen)}
@@ -193,26 +239,7 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
         </button>
 
         <div className={cn("flex items-center gap-1.5", !expanded && "hidden")}>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={clearing || !groupId}
-            onClick={() => void clearRecords()}
-          >
-            <RotateCcw className="size-3.5" />
-            {clearing ? "清除中" : "清除"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={exporting || !groupId}
-            onClick={() =>
-              void exportRecords({ method: methodFilter, status: statusFilter })
-            }
-          >
-            <Download className="size-3.5" />
-            {exporting ? "导出中" : "导出"}
-          </Button>
+          <RecordListActions />
         </div>
       </div>
 
@@ -299,7 +326,11 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
         ) : (
           <div
             ref={scrollRef}
-            className="min-h-0 max-panel:max-h-[46dvh] flex-1 overflow-y-auto"
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto",
+              // 嵌在对话框里时高度由对话框决定，不要再叠一层 46dvh 上限。
+              !embedded && "max-panel:max-h-[46dvh]",
+            )}
           >
             <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
               {virtualizer.getVirtualItems().map((item) => {
@@ -324,6 +355,7 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
                       onSelect={() => {
                         selectRecord(record.id);
                         if (!isWide) setListPanelOpen(false);
+                        onPicked?.();
                       }}
                       onDelete={() => void removeRecord(record.id)}
                     />

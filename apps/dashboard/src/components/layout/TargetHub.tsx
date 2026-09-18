@@ -3,6 +3,7 @@ import { selectActiveTarget, useProxiraStore } from "../../store/proxira";
 import { useUiStore } from "../../store/ui";
 import { IconButton } from "../ui/IconButton";
 import { Select } from "../ui/Select";
+import { RecordPicker } from "../records/RecordPicker";
 import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../lib/cn";
 
@@ -42,16 +43,23 @@ export const TargetHub = ({
         ) : null}
       </div>
 
-      <Select
-        label="选择转发地址"
-        value={currentId}
-        onChange={(next) => void switchActiveTarget(next)}
-        options={targets.map((target) => ({
-          value: target.id,
-          label: target.name,
-          hint: target.targetBaseUrl,
-        }))}
-      />
+      {/* 窄屏把「历史请求」收进这一行：下拉占剩余宽度，选择器按钮贴右边，
+          省掉下面那一整块列表高度。宽屏下按钮隐藏，列表仍在左栏常驻。 */}
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <Select
+            label="选择转发地址"
+            value={currentId}
+            onChange={(next) => void switchActiveTarget(next)}
+            options={targets.map((target) => ({
+              value: target.id,
+              label: target.name,
+              hint: target.targetBaseUrl,
+            }))}
+          />
+        </div>
+        <RecordPicker className="max-panel:inline-flex panel:hidden" />
+      </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         <Tooltip label="新增转发地址">

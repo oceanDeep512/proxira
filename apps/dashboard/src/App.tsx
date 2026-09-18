@@ -153,8 +153,9 @@ const App = () => {
           <div
             className={cn(
               "flex min-h-0 min-w-0 flex-col",
-              // 窄屏：左列最多占半个视口，剩下的全给详情
-              "max-panel:max-h-[48dvh] max-panel:shrink-0",
+              // 窄屏：历史请求改由转发地址那一行里的选择器唤起对话框，
+              // 左栏只剩转发地址这一块，高度自适应，剩下的全给详情。
+              "max-panel:shrink-0",
               // 宽屏：定宽侧栏 + 右侧分隔线
               "panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:border-r panel:border-line",
             )}
@@ -165,7 +166,9 @@ const App = () => {
               onDelete={() => setDeleteModalOpen(true)}
               onRules={openRulesModal}
             />
-            <RecordList isWide={isWide} />
+            {/* 窄屏整块隐藏（改走对话框选择器），宽屏仍是常驻侧栏。
+                用 CSS 隐藏而不是卸载，切换尺寸时筛选条件不会丢。 */}
+            <RecordList isWide={isWide} className="max-panel:hidden" />
           </div>
 
           <DetailPanel
