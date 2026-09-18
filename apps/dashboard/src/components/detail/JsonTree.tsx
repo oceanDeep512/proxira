@@ -322,14 +322,12 @@ export const JsonTree = ({
   className,
   withToolbar = false,
   toolbarExtra,
-  maxHeight = 560,
 }: {
   data: unknown;
   query?: string;
   className?: string;
   withToolbar?: boolean;
   toolbarExtra?: ReactNode;
-  maxHeight?: number;
 }) => {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -377,7 +375,7 @@ export const JsonTree = ({
   if (withToolbar) {
     return (
       <TreeContext.Provider value={ctx}>
-        <ViewerFrame className={className}>
+        <ViewerFrame className={cn("min-h-0 flex-1", className)}>
           <ViewerToolbar>
             <span className="font-mono text-[11px] text-fg-dim">{statsText}</span>
             {containerPaths.size > 0 ? (
@@ -394,7 +392,7 @@ export const JsonTree = ({
               ) : null}
             </ToolbarGroup>
           </ViewerToolbar>
-          <ViewerBody maxHeight={maxHeight} className="px-2">
+          <ViewerBody fill className="px-2">
             <div className="json-tree">
               <JsonNode value={data} depth={0} path="" />
             </div>

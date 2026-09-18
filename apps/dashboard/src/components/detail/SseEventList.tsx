@@ -29,7 +29,7 @@ export const SseEventList = ({
     });
 
   return (
-    <ViewerFrame>
+    <ViewerFrame className="min-h-0 flex-1">
       <ViewerToolbar>
         <span className="font-mono text-[11px] text-fg-dim">{events.length} 个事件</span>
         <ToolbarButton
@@ -41,7 +41,7 @@ export const SseEventList = ({
         {toolbarExtra}
       </ViewerToolbar>
 
-      <ViewerBody className="px-2">
+      <ViewerBody fill className="px-2">
         {truncated ? (
           <p className="m-0 px-0.5 py-1 text-[11px] text-fg-dim">
             流较长，仅采样了前部分事件，完整内容请用上游日志核对。

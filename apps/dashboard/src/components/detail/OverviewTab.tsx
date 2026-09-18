@@ -59,7 +59,7 @@ export const OverviewTab = ({
   const ratio = maxDurationMs > 0 ? Math.min(1, record.durationMs / maxDurationMs) : 0;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <div className="flex flex-wrap items-center gap-2">
         <Pill tone={methodTone(record.method)}>{record.method}</Pill>
         <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-fg">

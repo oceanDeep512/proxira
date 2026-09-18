@@ -14,7 +14,14 @@ export const ViewerFrame = ({
   children: ReactNode;
   className?: string;
 }) => (
-  <div className={cn("overflow-hidden rounded-md border border-line bg-surface-2", className)}>
+  // 必须是 flex 列：否则内部 ViewerBody 的 flex-1 拿不到确定高度，
+  // 会被内容撑到几万像素后再被 overflow-hidden 裁掉（既不能滚也看不全）。
+  <div
+    className={cn(
+      "flex min-w-0 flex-col overflow-hidden rounded-md border border-line bg-surface-2",
+      className,
+    )}
+  >
     {children}
   </div>
 );
@@ -79,14 +86,29 @@ export const ViewerBody = ({
   maxHeight = 560,
   className,
   scrollRef,
+  fill = false,
 }: {
   children: ReactNode;
   maxHeight?: number;
   className?: string;
   /** 需要滚动到指定元素的调用方（源码视图定位搜索命中）自己拿这个 ref。 */
   scrollRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * fill：高度不再写死，改为吃掉父级 flex 列的剩余空间。
+   * 面板里的视图必须用 fill，否则窗口拉高时内容区不会跟着变高。
+   * 注意：fill 要生效，祖先链上每层都得有确定高度（min-h-0 / flex-1）。
+   */
+  fill?: boolean;
 }) => (
-  <div ref={scrollRef} className={cn("overflow-auto py-1", className)} style={{ maxHeight }}>
+  <div
+    ref={scrollRef}
+    className={cn(
+      "overflow-auto py-1",
+      fill ? "min-h-0 min-h-[140px] flex-1" : "",
+      className,
+    )}
+    style={fill ? undefined : { maxHeight }}
+  >
     {children}
   </div>
 );

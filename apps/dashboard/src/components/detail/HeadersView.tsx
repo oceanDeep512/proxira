@@ -24,8 +24,9 @@ export const HeadersView = ({
     return <EmptyState title="没有 Header" hint="这个方向没有记录到任何请求头。" />;
   }
 
+  // 内容区父级是 overflow-hidden 的 flex 列：这里必须自己滚，否则字段多了会被裁掉。
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[12px] text-fg-soft">{entries.length} 个字段</span>
         <Segmented

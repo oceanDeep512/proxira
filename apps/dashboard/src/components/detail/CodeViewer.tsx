@@ -184,14 +184,12 @@ export const CodeViewer = ({
   language = "text",
   query = "",
   className,
-  maxHeight = 560,
   toolbarExtra,
 }: {
   code: string;
   language?: CodeLanguage;
   query?: string;
   className?: string;
-  maxHeight?: number;
   toolbarExtra?: ReactNode;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -381,7 +379,7 @@ export const CodeViewer = ({
   }
 
   return (
-    <ViewerFrame className={className}>
+    <ViewerFrame className={cn("min-h-0 flex-1", className)}>
       <ViewerToolbar>
         {foldableLines.length > 0 ? (
           <ToolbarButton
@@ -434,7 +432,7 @@ export const CodeViewer = ({
         </ToolbarGroup>
       </ViewerToolbar>
 
-      <ViewerBody scrollRef={scrollRef} maxHeight={maxHeight}>
+      <ViewerBody fill scrollRef={scrollRef}>
         {rows}
         {lines.length > renderCount ? (
           <button

@@ -132,7 +132,6 @@ export const BodyViewer = ({
       code={rawText}
       language={languageForMode(view.mode)}
       query={query}
-      maxHeight={560}
       toolbarExtra={
         <>
           {jsonFallback ? (
@@ -160,8 +159,10 @@ export const BodyViewer = ({
     />
   );
 
+  // min-h-0 + flex-1：把详情面板的剩余高度交给内容视图，
+  // 窗口拉高时视图跟着变高，而不是固定 560px 后在下面留一片空白。
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <Pill tone="accent">{bodyModeLabel(view)}</Pill>
         {contentType ? (
@@ -240,14 +241,14 @@ export const BodyViewer = ({
           toolbarExtra={actions}
         />
       ) : activeMode === "table" && view.csvTable ? (
-        <ViewerFrame>
+        <ViewerFrame className="min-h-0 flex-1">
           <ViewerToolbar>
             <span className="font-mono text-[11px] text-fg-dim">
               {view.csvTable.totalRows} 行 · {view.csvTable.headers.length} 列
             </span>
             {actions}
           </ViewerToolbar>
-          <ViewerBody className="px-2">
+          <ViewerBody fill className="px-2">
             <CsvTable
               headers={view.csvTable.headers}
               rows={view.csvTable.rows}
@@ -257,12 +258,12 @@ export const BodyViewer = ({
           </ViewerBody>
         </ViewerFrame>
       ) : activeMode === "preview" ? (
-        <ViewerFrame>
+        <ViewerFrame className="min-h-0 flex-1">
           <ViewerToolbar>
             <span className="font-mono text-[11px] text-fg-dim">富文本预览</span>
             {actions}
           </ViewerToolbar>
-          <ViewerBody className="px-3 py-2">
+          <ViewerBody fill className="px-3 py-2">
             <div
               className="rich-preview"
               dangerouslySetInnerHTML={{ __html: view.previewHtml }}

@@ -186,7 +186,9 @@ export const DetailPanel = ({
         })}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      {/* 内容区自己不再滚动：高度交给内部视图，由它自己滚。
+          这层必须是 flex 列 + min-h-0，否则内层 flex-1 拿不到确定高度。 */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
         {activeTab === "overview" ? (
           <OverviewTab record={record} maxDurationMs={maxDurationMs} />
         ) : activeTab === "response-body" ? (
