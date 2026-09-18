@@ -55,7 +55,7 @@ const client = new OpenAI({
 ```bash
 npx proxira --port 3010 --target http://localhost:8080   # 指定端口和上游
 npx proxira -nx                                          # 关闭 /proxira 前缀，端口下全部转发
-npx proxira --host 0.0.0.0                               # 暴露到局域网（启动横幅会打印可用地址）
+npx proxira --host lan                                   # 让局域网其他电脑也能用（见下一节）
 npx proxira --token my-secret                            # 给内部 API 与 SSE 加访问令牌
 ```
 
@@ -65,6 +65,37 @@ HTTPS（客户端强制 HTTPS 时用）：
 npx proxira gen-cert      # 生成自签名证书
 npx proxira --https       # 用生成的证书启动
 ```
+
+## 让其他电脑也能用（局域网共享）
+
+默认只监听 `127.0.0.1`，**只有本机自己能连**。想让同一网络下的其他电脑（或手机）也用这台机器上的代理：
+
+```bash
+npx proxira --host lan
+```
+
+启动后横幅直接给出这台机器对外的地址，别的设备填它即可：
+
+```text
+Proxy: http://192.168.1.4:3000/proxira     ← 其他电脑填这个
+Local: http://localhost:3000/proxira       ← 本机自己用这个
+Host: 0.0.0.0
+Dashboard: http://192.168.1.4:3000/_proxira/ui
+```
+
+| `--host` 值 | 谁能连 |
+|---|---|
+| `127.0.0.1`（默认） | 只有本机 |
+| `lan` 或 `0.0.0.0` | 同一网络下的所有设备 |
+| `192.168.1.4`（本机某个 IP） | 只能通过那张网卡连进来 |
+
+> [!TIP]
+> `--host` 填的是**本机监听哪张网卡**，不是上游地址、也不是别人的地址。
+> 所以一般不用填 `192.168.x.x`——直接 `--host lan` 就行，换网络也不会失效。
+
+> [!WARNING]
+> 开放后同一网络里的人都能看到你的请求历史与响应正文（含 token / cookie），
+> 也能改上游地址。只在可信网络里开，必要时加 `--token`。
 
 ## 核心能力
 
@@ -86,7 +117,7 @@ npx proxira --https       # 用生成的证书启动
 | `-d, --data-dir <path>` | 配置目录 | 用户级目录 |
 | `-x, --prefix <path>` | 自定义代理前缀 | `/proxira` |
 | `-nx, --no-prefix` | 关闭代理前缀 | - |
-| `--host <addr>` | 监听地址 | `127.0.0.1` |
+| `--host <addr>` | 监听地址，`lan` 或 `0.0.0.0` = 局域网可访问 | `127.0.0.1` |
 | `--token <token>` | 内部 API / SSE 访问令牌 | 关闭 |
 | `-b, --no-banner` | 关闭启动 Banner | - |
 | `-s, --https` | 启用 HTTPS 服务模式 | - |
@@ -130,7 +161,7 @@ npx proxira --https       # 用生成的证书启动
 
 > [!NOTE]
 > - 定位是本地开发调试工具，请勿直接暴露公网。
-> - 默认只监听 `127.0.0.1`；需要局域网访问用 `--host 0.0.0.0`。
+> - 默认只监听 `127.0.0.1`，其他电脑连不上；需要局域网访问用 `--host lan`。
 > - 默认会记录完整请求/响应正文，联调真实数据请注意敏感信息。
 > - 非流式正文超过 `PROXY_MAX_BODY_CAPTURE_BYTES` 才截断（只截记录，转发始终完整）；
 >   流式响应**默认全量捕获**。
