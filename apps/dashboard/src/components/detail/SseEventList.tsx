@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { SseEventView } from "../../lib/body";
 import { JsonTree } from "./JsonTree";
-import { ToolbarButton, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
+import { ToolbarButton, ToolbarGroup, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
 import { cn } from "../../lib/cn";
 
 /** SSE：逐帧折叠 + 全局折叠/展开，JSON 帧直接走树视图。 */
@@ -31,14 +31,17 @@ export const SseEventList = ({
   return (
     <ViewerFrame className="min-h-0 flex-1">
       <ViewerToolbar>
-        <span className="font-mono text-[11px] text-fg-dim">{events.length} 个事件</span>
+        <span className="min-w-[6rem] truncate font-mono text-[11px] text-fg-dim">
+          {events.length} 个事件
+        </span>
         <ToolbarButton
           label={allCollapsed ? "全部展开" : "全部折叠"}
           onClick={() =>
             setCollapsed(allCollapsed ? new Set() : new Set(events.map((_, index) => index)))
           }
+          disabled={events.length === 0}
         />
-        {toolbarExtra}
+        <ToolbarGroup>{toolbarExtra}</ToolbarGroup>
       </ViewerToolbar>
 
       <ViewerBody fill className="px-2">

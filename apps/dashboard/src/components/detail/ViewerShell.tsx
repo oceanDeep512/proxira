@@ -48,18 +48,22 @@ export const ToolbarButton = ({
   label,
   onClick,
   active = false,
+  disabled = false,
   className,
 }: {
   icon?: ReactNode;
   label: string;
   onClick: () => void;
   active?: boolean;
+  /** 无可折叠内容时也要占住位置，否则切视图时后面的按钮会左右跳。 */
+  disabled?: boolean;
   className?: string;
 }) => (
   <button
     type="button"
     onClick={onClick}
     aria-pressed={active}
+    disabled={disabled}
     className={cn(
       "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
       "transition-colors hover:bg-surface-3 hover:text-fg",
@@ -67,6 +71,7 @@ export const ToolbarButton = ({
       "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
       // 触摸设备上放大到 36px，避免密集菜单变成误触陷阱。
       "pointer-coarse:min-h-9 pointer-coarse:px-2",
+      "disabled:pointer-events-none disabled:opacity-45",
       active ? "text-accent-strong" : "text-fg-dim",
       className,
     )}

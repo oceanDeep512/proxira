@@ -185,12 +185,16 @@ export const CodeViewer = ({
   query = "",
   className,
   toolbarExtra,
+  toolbarActions,
 }: {
   code: string;
   language?: CodeLanguage;
   query?: string;
   className?: string;
+  /** 视图控件（如压缩/格式化），排在左侧、紧跟折叠控件之后。 */
   toolbarExtra?: ReactNode;
+  /** 操作按钮（复制/下载），统一排到右侧组末尾，切视图时不移动。 */
+  toolbarActions?: ReactNode;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 控制台默认不换行；长行横向滚，和 DevTools 一致。
@@ -336,7 +340,9 @@ export const CodeViewer = ({
           aria-hidden
           className={cn(
             "sticky left-0 z-[1] w-10 shrink-0 select-none border-r border-line/70 bg-surface-2",
-            "pr-2 text-right font-mono text-[11px] leading-[1.65] text-fg-dim",
+            // 行高写成固定值：gutter 是 11px 而正文是 13px×1.65≈21px，
+            // 用同样的 leading 比例会让行号比正文矮一截、对不齐基线。
+            "pr-2 text-right font-mono text-[11px] leading-[21px] text-fg-dim",
           )}
         >
           {i + 1}
@@ -381,13 +387,18 @@ export const CodeViewer = ({
   return (
     <ViewerFrame className={cn("min-h-0 flex-1", className)}>
       <ViewerToolbar>
-        {foldableLines.length > 0 ? (
-          <ToolbarButton
-            label={allFolded ? "全部展开" : "全部折叠"}
-            onClick={toggleFoldAll}
-            icon={allFolded ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
-          />
-        ) : null}
+        {/* 和树形工具栏同构：统计信息（锁宽）→ 折叠控件 → 右侧操作组，
+            这样两个视图来回切，左侧按钮的位置不动。 */}
+        <span className="min-w-[6rem] truncate font-mono text-[11px] text-fg-dim">
+          {lines.length} 行
+        </span>
+
+        <ToolbarButton
+          label={allFolded ? "全部展开" : "全部折叠"}
+          onClick={toggleFoldAll}
+          disabled={foldableLines.length === 0}
+          icon={allFolded ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
+        />
 
         <ToolbarButton
           label={wrap ? "不换行" : "自动换行"}
@@ -396,7 +407,7 @@ export const CodeViewer = ({
           icon={<WrapText className="size-3" />}
         />
 
-        {/* 复制/下载这类操作统一排在折叠控件之后，和树形工具栏的顺序保持一致 */}
+        {/* 视图控件放左侧（如压缩/格式化），位置和树形的折叠控件对齐 */}
         {toolbarExtra}
 
         <ToolbarGroup>
@@ -409,26 +420,29 @@ export const CodeViewer = ({
               <span className="font-mono text-[11px] text-fg-dim">
                 {Math.min(matchIndex + 1, matches.length)}/{matches.length}
               </span>
-            <button
-              type="button"
-              aria-label="上一个匹配"
-              onClick={() =>
-                setMatchIndex((value) => (value - 1 + matches.length) % matches.length)
-              }
-              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
-            >
-              <ChevronUp className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label="下一个匹配"
-              onClick={() => setMatchIndex((value) => (value + 1) % matches.length)}
-              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
-            >
-              <ChevronDown className="size-3.5" />
-            </button>
+              <button
+                type="button"
+                aria-label="上一个匹配"
+                onClick={() =>
+                  setMatchIndex((value) => (value - 1 + matches.length) % matches.length)
+                }
+                className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+              >
+                <ChevronUp className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="下一个匹配"
+                onClick={() => setMatchIndex((value) => (value + 1) % matches.length)}
+                className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+              >
+                <ChevronDown className="size-3.5" />
+              </button>
             </>
           ) : null}
+
+          {/* 复制/下载这类操作统一排在右侧组末尾（紧跟命中计数之后） */}
+          {toolbarActions}
         </ToolbarGroup>
       </ViewerToolbar>
 

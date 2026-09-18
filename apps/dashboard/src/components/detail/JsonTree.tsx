@@ -133,6 +133,9 @@ const Row = ({
   onCopy?: () => void;
 }) => (
   <div className="json-row group/row" data-path={path}>
+    {/* 行号：数字由 CSS counter 生成（.json-gutter::before），
+        宽度和源码视图的 gutter 一致，树形 / 原始切换时左边距不动。 */}
+    <span className="json-gutter" aria-hidden />
     <IndentGuides depth={depth} />
     {children}
     {onCopy ? (
@@ -212,7 +215,7 @@ const JsonNode = ({
 
     return (
       <Row depth={depth} path={path} onCopy={copyNode}>
-        <span className="w-3.5 shrink-0" />
+        <span className="w-4 shrink-0" />
         {keyPart}
         {/* 不能 flex-1：会把行尾逗号推到最右边，值多长就占多宽 */}
         <span className={cn("min-w-0 break-all", valueClass(value))}>
@@ -293,7 +296,7 @@ const JsonNode = ({
           ) : null}
 
           <Row depth={depth} path={`${path}/__close`}>
-            <span className="w-3.5 shrink-0" />
+            <span className="w-4 shrink-0" />
             <span className="json-punct">
               {close}
               {isLast ? "" : ","}
@@ -377,23 +380,32 @@ export const JsonTree = ({
       <TreeContext.Provider value={ctx}>
         <ViewerFrame className={cn("min-h-0 flex-1", className)}>
           <ViewerToolbar>
-            <span className="font-mono text-[11px] text-fg-dim">{statsText}</span>
-            {containerPaths.size > 0 ? (
-              <ToolbarButton
-                label={allCollapsed ? "全部展开" : "全部折叠"}
-                onClick={toggleAll}
-                icon={allCollapsed ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
-              />
-            ) : null}
-            {toolbarExtra}
+            {/* 统计信息固定最小宽度：树形「N 个节点」与源码「N 行」宽度不同，
+                不锁宽的话切视图时后面的按钮会左右跳。 */}
+            <span className="min-w-[6rem] truncate font-mono text-[11px] text-fg-dim">
+              {statsText}
+            </span>
+            <ToolbarButton
+              label={allCollapsed ? "全部展开" : "全部折叠"}
+              onClick={toggleAll}
+              disabled={containerPaths.size === 0}
+              icon={
+                allCollapsed ? (
+                  <ChevronsUpDown className="size-3" />
+                ) : (
+                  <ChevronsDownUp className="size-3" />
+                )
+              }
+            />
             <ToolbarGroup>
               {query.trim().length > 0 && matchPaths.size === 0 ? (
                 <span className="font-mono text-[11px] text-warning">无匹配</span>
               ) : null}
+              {toolbarExtra}
             </ToolbarGroup>
           </ViewerToolbar>
-          <ViewerBody fill className="px-2">
-            <div className="json-tree">
+          <ViewerBody fill className="pr-2">
+            <div className="json-tree json-tree--numbered">
               <JsonNode value={data} depth={0} path="" />
             </div>
           </ViewerBody>

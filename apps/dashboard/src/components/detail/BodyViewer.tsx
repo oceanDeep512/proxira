@@ -15,7 +15,7 @@ import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { Pill } from "../ui/Pill";
 import { Segmented } from "../ui/Segmented";
-import { ToolbarButton, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
+import { ToolbarButton, ToolbarGroup, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
 import { CodeViewer, languageForMode } from "./CodeViewer";
 import { CsvTable } from "./CsvTable";
 import { JsonTree } from "./JsonTree";
@@ -142,17 +142,15 @@ export const BodyViewer = ({
       language={languageForMode(view.mode)}
       query={query}
       toolbarExtra={
-        <>
-          {jsonFallback ? (
-            <ToolbarButton
-              label={minified ? "格式化" : "压缩"}
-              icon={<Braces className="size-3" />}
-              onClick={() => setMinified((value) => !value)}
-            />
-          ) : null}
-          {actions}
-        </>
+        jsonFallback ? (
+          <ToolbarButton
+            label={minified ? "格式化" : "压缩"}
+            icon={<Braces className="size-3" />}
+            onClick={() => setMinified((value) => !value)}
+          />
+        ) : null
       }
+      toolbarActions={actions}
     />
   ) : (
     <EmptyState
@@ -254,10 +252,10 @@ export const BodyViewer = ({
       ) : activeMode === "table" && view.csvTable ? (
         <ViewerFrame className="min-h-0 flex-1">
           <ViewerToolbar>
-            <span className="font-mono text-[11px] text-fg-dim">
+            <span className="min-w-[6rem] truncate font-mono text-[11px] text-fg-dim">
               {view.csvTable.totalRows} 行 · {view.csvTable.headers.length} 列
             </span>
-            {actions}
+            <ToolbarGroup>{actions}</ToolbarGroup>
           </ViewerToolbar>
           <ViewerBody fill className="px-2">
             <CsvTable
@@ -271,8 +269,10 @@ export const BodyViewer = ({
       ) : activeMode === "preview" ? (
         <ViewerFrame className="min-h-0 flex-1">
           <ViewerToolbar>
-            <span className="font-mono text-[11px] text-fg-dim">富文本预览</span>
-            {actions}
+            <span className="min-w-[6rem] truncate font-mono text-[11px] text-fg-dim">
+              富文本预览
+            </span>
+            <ToolbarGroup>{actions}</ToolbarGroup>
           </ViewerToolbar>
           <ViewerBody fill className="px-3 py-2">
             <div

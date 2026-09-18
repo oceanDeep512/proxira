@@ -549,6 +549,9 @@
   font-family: var(--px-font-mono);
   font-size: 13px;
   line-height: 1.7;
+  /* 行号用 CSS counter：折叠掉的行不生成盒子就不会计数，
+     编号天然跟着「当前可见的行」走，不用在递归渲染里传计数器。 */
+  counter-reset: json-line;
 }
 
 .json-row {
@@ -558,6 +561,37 @@
   padding: 1px 6px 1px 0;
   border-radius: var(--radius-xs);
   transition: background-color 120ms ease;
+  counter-increment: json-line;
+}
+
+/* 行号 gutter：宽度 / 边框 / 背景和源码视图（.code-row 里的 gutter）完全一致，
+   树形与原始来回切时左边距不会跳。 */
+.json-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  /* 默认不显示：Headers / SSE 帧里嵌套的树不需要行号，
+     只有正文主视图（.json-tree--numbered）才打开。 */
+  display: none;
+  flex: none;
+  width: 40px;
+  padding-right: 8px;
+  border-right: 1px solid color-mix(in srgb, var(--px-line) 70%, transparent);
+  background: var(--px-surface-2);
+  color: var(--px-text-dim);
+  font-size: 11px;
+  /* 与 .json-tree 的 13px × 1.7 ≈ 22px 对齐，行号才和值在同一基线上 */
+  line-height: 22px;
+  text-align: right;
+  user-select: none;
+}
+
+.json-gutter::before {
+  content: counter(json-line);
+}
+
+.json-tree--numbered .json-gutter {
+  display: block;
 }
 
 .json-row:hover {
