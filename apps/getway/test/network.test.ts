@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   describeHostReachability,
+  expandHostAlias,
   listLanAddresses,
   resolveReachableAddresses,
+  validateHost,
 } from "../src/shared/network.js";
 
 const fakeInterfaces = (
@@ -112,6 +114,57 @@ describe("network", () => {
 
     it("returns nothing when the bound address is not a lan address", () => {
       expect(resolveReachableAddresses("203.0.113.7", lan)).toEqual([]);
+    });
+
+    it("treats the `lan` alias as wildcard", () => {
+      expect(resolveReachableAddresses("lan", lan)).toEqual(lan);
+    });
+  });
+
+  describe("expandHostAlias", () => {
+    it("turns `lan` into the wildcard address", () => {
+      expect(expandHostAlias("lan")).toBe("0.0.0.0");
+      expect(expandHostAlias("LAN")).toBe("0.0.0.0");
+      expect(expandHostAlias("  lan  ")).toBe("0.0.0.0");
+    });
+
+    it("leaves any other value untouched", () => {
+      expect(expandHostAlias("127.0.0.1")).toBe("127.0.0.1");
+      expect(expandHostAlias("192.168.1.23")).toBe("192.168.1.23");
+    });
+  });
+
+  describe("validateHost", () => {
+    const lan = ["192.168.1.23", "10.0.0.5"];
+
+    it("accepts loopback, wildcard and the lan alias", () => {
+      expect(validateHost("127.0.0.1", lan).ok).toBe(true);
+      expect(validateHost("localhost", lan).ok).toBe(true);
+      expect(validateHost("0.0.0.0", lan).ok).toBe(true);
+      expect(validateHost("lan", lan).ok).toBe(true);
+    });
+
+    it("accepts an address this machine actually has", () => {
+      expect(validateHost("192.168.1.23", lan).ok).toBe(true);
+    });
+
+    it("rejects an address that is not on this machine", () => {
+      const result = validateHost("192.168.99.99", lan);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        // The message must be actionable, not just "invalid".
+        expect(result.message).toContain("192.168.1.23");
+        expect(result.message).toContain("--host lan");
+      }
+    });
+
+    it("rejects junk and explains the accepted forms", () => {
+      const result = validateHost("abc", lan);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toContain("--host lan");
+      }
+      expect(validateHost("300.1.1.1", lan).ok).toBe(false);
     });
   });
 });

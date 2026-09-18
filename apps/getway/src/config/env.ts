@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { RuntimeConfig } from "../app/types.js";
 import type { FileSystemAdapter } from "../app/types.js";
 import { resolveDataDir } from "./data-dir.js";
+import { expandHostAlias } from "../shared/network.js";
 
 const INTERNAL_ROUTE_PREFIX = "/_proxira";
 const DEFAULT_PROXY_PREFIX = "/proxira";
@@ -171,7 +172,8 @@ export const loadRuntimeConfig = (
   return {
     internalRoutePrefix: INTERNAL_ROUTE_PREFIX,
     defaultProxyPrefix: DEFAULT_PROXY_PREFIX,
-    host: env.PROXY_HOST?.trim() || DEFAULT_HOST,
+    // `--host lan` 是 `--host 0.0.0.0` 的别名，见 shared/network.ts。
+    host: expandHostAlias(env.PROXY_HOST?.trim() || DEFAULT_HOST),
     serverPort: normalizePort(env.PORT),
     maxBodyCaptureBytes,
     streamMaxCaptureBytes,

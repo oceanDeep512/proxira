@@ -16,6 +16,7 @@ import { loadRuntimeConfig } from "./config/env.js";
 import { DashboardAssets } from "./dashboard/assets.js";
 import { ProxyService } from "./proxy/service.js";
 import { createNodeFileSystem } from "./shared/node-file-system.js";
+import { validateHost } from "./shared/network.js";
 
 type RuntimeConfig = ReturnType<typeof loadRuntimeConfig>;
 type App = ReturnType<typeof createApp>;
@@ -235,6 +236,14 @@ const registerShutdownHooks = (
 const bootstrap = async (): Promise<void> => {
   const fs = createNodeFileSystem();
   const config = loadRuntimeConfig(process.env, fs);
+
+  // 监听地址填错时 node 只报 getaddrinfo ENOTFOUND，看不出该怎么改。
+  const hostCheck = validateHost(config.host);
+  if (!hostCheck.ok) {
+    console.error(chalk.red(`[proxira] ${hostCheck.message}`));
+    process.exit(1);
+  }
+
   const startedAt = Date.now();
   const runtime = new RuntimeStore({
     config,

@@ -27,7 +27,7 @@ const resolveNetworkInfo = (options: {
     addresses: [],
     hint: isWildcard
       ? "未检测到局域网地址"
-      : `未暴露（当前仅监听 ${host}，加 --host 0.0.0.0 可暴露到局域网）`,
+      : `未暴露（当前仅监听 ${host}，加 --host lan 可暴露到局域网）`,
   };
 };
 
@@ -48,25 +48,36 @@ export const printStartupInfo = (options: {
     effectiveHistoryPersistLimit,
   } = options;
   const protocol = config.httpsEnabled ? "https" : "http";
-  const proxyUrl = `${protocol}://localhost:${port}`;
-  const proxyEntryUrl = config.proxyPrefixEnabled
-    ? `${proxyUrl}${config.proxyPrefix}`
-    : proxyUrl;
-  const dashboardUrl = `${protocol}://localhost:${port}${config.internalRoutePrefix}/ui`;
+  const localBase = `${protocol}://localhost:${port}`;
+  const withPrefix = (base: string): string =>
+    config.proxyPrefixEnabled ? `${base}${config.proxyPrefix}` : base;
+  const localEntryUrl = withPrefix(localBase);
+  const localDashboardUrl = `${localBase}${config.internalRoutePrefix}/ui`;
   const proxyModeLabel = config.proxyPrefixEnabled
     ? config.proxyPrefix
     : "disabled";
   const httpsModeLabel = config.httpsEnabled ? "enabled" : "disabled";
   const network = resolveNetworkInfo({ protocol, port, host: config.host });
 
+  // 局域网可达时，把局域网地址当作「这台机器对外的地址」放在最显眼的位置：
+  // 这才是别的机器要填的地址。localhost 退到第二行给本机自己用。
+  const lanBase = network.addresses[0] ?? null;
+  const primaryBase = lanBase ?? localBase;
+  const primaryEntryUrl = withPrefix(primaryBase);
+  const primaryDashboardUrl = `${primaryBase}${config.internalRoutePrefix}/ui`;
+
   if (config.disableStartupBanner) {
-    console.log(`代理服务已启动：${proxyUrl}`);
+    console.log(`代理服务已启动：${primaryBase}`);
     console.log(`监听地址：${config.host}`);
-    console.log(`代理入口：${proxyEntryUrl}`);
-    for (const url of network.addresses) {
-      console.log(`局域网：${url}`);
+    console.log(`代理入口：${primaryEntryUrl}`);
+    if (lanBase) {
+      console.log(`本机入口：${localEntryUrl}`);
     }
-    if (network.hint) {
+    if (network.addresses.length > 0) {
+      for (const url of network.addresses) {
+        console.log(`局域网：${url}`);
+      }
+    } else if (network.hint) {
       console.log(`局域网：${network.hint}`);
     }
     console.log(`代理前缀：${proxyModeLabel}`);
@@ -77,7 +88,7 @@ export const printStartupInfo = (options: {
     console.log(`本地持久化最近条数：${effectiveHistoryPersistLimit}`);
     console.log(`访问令牌：${config.accessToken ? "已启用" : "未启用"}`);
     if (dashboard.dashboardDistDir) {
-      console.log(`管理面板：${dashboardUrl}`);
+      console.log(`管理面板：${primaryDashboardUrl}`);
     } else {
       console.log(
         "未检测到管理面板构建产物，请先执行 `pnpm --filter @proxira/dashboard build`。",
@@ -85,10 +96,10 @@ export const printStartupInfo = (options: {
     }
     printStartupTips(
       config,
-      proxyEntryUrl,
-      dashboardUrl,
+      primaryEntryUrl,
+      primaryDashboardUrl,
       targetBaseUrl,
-      network.addresses[0] ?? null,
+      lanBase,
     );
     return;
   }
@@ -97,10 +108,15 @@ export const printStartupInfo = (options: {
     [chalk.cyanBright, chalk.blueBright, chalk.magentaBright][index % 3]!(line),
   ).join("\n");
 
+  const lanExtra = network.addresses.slice(1);
   const summary = [
     logo,
     "",
-    `${chalk.bold("Proxy")}: ${chalk.cyan(proxyEntryUrl)}`,
+    `${chalk.bold("Proxy")}: ${chalk.cyan(primaryEntryUrl)}`,
+    // 有局域网地址时 localhost 只是本机入口；没有时 Proxy 已经是 localhost，不重复。
+    ...(lanBase
+      ? [`${chalk.bold("Local")}: ${chalk.gray(localEntryUrl)}`]
+      : []),
     `${chalk.bold("Host")}: ${chalk.gray(config.host)}`,
     `${chalk.bold("Prefix")}: ${chalk.gray(proxyModeLabel)}`,
     `${chalk.bold("HTTPS")}: ${
@@ -108,15 +124,11 @@ export const printStartupInfo = (options: {
     }`,
     `${chalk.bold("Dashboard")}: ${
       dashboard.dashboardDistDir
-        ? chalk.cyan(dashboardUrl)
+        ? chalk.cyan(primaryDashboardUrl)
         : chalk.yellow("not found (run dashboard build)")
     }`,
     ...(network.addresses.length > 0
-      ? network.addresses.map((url, index) =>
-          index === 0
-            ? `${chalk.bold("Network")}: ${chalk.cyan(url)}`
-            : `${" ".repeat(9)}${chalk.cyan(url)}`,
-        )
+      ? lanExtra.map((url) => `${chalk.bold("Network")}: ${chalk.cyan(url)}`)
       : [`${chalk.bold("Network")}: ${chalk.gray(network.hint)}`]),
     `${chalk.bold("Target")}: ${chalk.green(targetBaseUrl)}`,
     `${chalk.bold("History Limit")}: ${chalk.gray(String(historyLimit))}`,
@@ -144,10 +156,10 @@ export const printStartupInfo = (options: {
   );
   printStartupTips(
     config,
-    proxyEntryUrl,
-    dashboardUrl,
+    primaryEntryUrl,
+    primaryDashboardUrl,
     targetBaseUrl,
-    network.addresses[0] ?? null,
+    lanBase,
   );
 };
 
@@ -166,23 +178,27 @@ const printStartupTips = (
     `1) 将你要联调的 SDK/应用请求地址指向 ${chalk.cyan(proxyEntryUrl)}${proxyEntryHint}`,
     `2) 在浏览器打开 ${chalk.cyan(dashboardUrl)} 查看请求和响应详情`,
     `3) 通过面板可修改上游地址，当前生效值为 ${chalk.green(targetBaseUrl)}`,
-    `4) 仅建议本地开发使用，请勿直接暴露到公网`,
   ];
 
   if (networkBaseUrl) {
+    // 已经对局域网开放：把「别的机器怎么连」讲成可直接照抄的一句话。
+    const lanEntry = config.proxyPrefixEnabled
+      ? `${networkBaseUrl}${config.proxyPrefix}`
+      : networkBaseUrl;
     tips.push(
-      `5) 局域网内其他设备可用 ${chalk.cyan(
-        `${networkBaseUrl}${config.internalRoutePrefix}/ui`,
-      )} 打开面板，或把请求指向 ${chalk.cyan(
-        config.proxyPrefixEnabled
-          ? `${networkBaseUrl}${config.proxyPrefix}`
-          : networkBaseUrl,
-      )}`,
-      chalk.yellow(
-        `   注意：监听地址已对局域网开放，请确认当前网络可信`,
-      ),
+      `4) 同一网络下的其他电脑把请求地址填成 ${chalk.cyan(
+        lanEntry,
+      )}，面板填 ${chalk.cyan(`${networkBaseUrl}${config.internalRoutePrefix}/ui`)}`,
+      chalk.yellow(`   注意：已对局域网开放，请确认当前网络可信`),
+    );
+  } else {
+    tips.push(
+      `4) 当前只监听 ${chalk.gray(config.host)}，${chalk.yellow(
+        "其他电脑连不上这台机器",
+      )}；要让局域网内其他设备访问，用 ${chalk.cyan("proxira --host lan")} 重启`,
     );
   }
+  tips.push(`5) 仅建议本地开发使用，请勿直接暴露到公网`);
 
   if (config.cliMode) {
     tips.push(
