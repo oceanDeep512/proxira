@@ -10,8 +10,8 @@ import Papa from "papaparse";
 import YAML from "js-yaml";
 import { XMLParser } from "fast-xml-parser";
 import xmlFormat from "xml-formatter";
-import { formatBytes, toPrettyJson } from "./format.js";
-import { redactJsonValue, redactText } from "./redact.js";
+import { formatBytes, toPrettyJson } from "./format";
+import { redactJsonValue, redactText } from "./redact";
 
 export type SseEventView = {
   event: string;
