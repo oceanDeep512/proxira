@@ -4,498 +4,163 @@
 ![node](https://img.shields.io/badge/node-%3E%3D20-339933)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
-> 轻量化实时请求代理工具 —— 让本地开发联调更高效
-
-Proxira 是一个**本地开发联调用的实时请求代理与观测工具**。
-它在本地启动代理端口，将请求转发到真实上游服务，并通过 Web 控制面板实时展示请求、响应、耗时与错误信息。
-
-除了观测，它还能主动制造问题：Mock 桩数据、模拟 5xx、注入延迟、在流式响应中途断开、截断响应体；
-也能把任意一条历史请求改改参数直接重放，并和原响应做逐行差异对比。
-
-## 项目作用
-
-- 让 SDK / 前端 / 客户端请求统一走本地代理，便于观测与排查
-- 在不改业务请求代码的前提下，快速切换真实上游地址
-- 对请求数据进行"可视化追踪"：状态码、耗时、Headers、Body、错误等
-- 支持并行调试多环境（如 dev / test / staging）
-
-## 目录
-
-- [核心能力](#核心能力)
-- [快速开始](#快速开始) · [把请求接进来](#把请求接进来) · [HTTPS 模式](#https-模式快速开始)
-- [可用参数](#可用参数) · [使用示例](#使用示例)
-- [拦截规则](#拦截规则mock--故障注入) · [请求重放与差异对比](#请求重放与差异对比) · [敏感信息脱敏](#敏感信息脱敏) · [访问令牌](#访问令牌可选)
-- [面板实用能力](#面板实用能力) · [折叠·局域网·窄屏自适应](#折叠局域网窄屏自适应) · [转发地址级超时](#转发地址级超时)
-- [数据存放位置](#数据存放位置) · [可选环境变量](#可选环境变量)
-- [常见问题](#常见问题) · [从源码开发](#从源码开发) · [更新日志](#更新日志)
-
-## 核心能力
-
-- **代理与转发** - 请求透明转发（Path / Query / Headers / Body）
-- **HTTP & HTTPS 支持** - 支持 HTTP 和 HTTPS 上游服务，也支持 HTTPS 服务模式
-- **智能证书生成** - 一键生成自签名证书，自动检测环境并提供安装指引
-- **多转发地址管理** - 每个转发地址独立上游地址与历史记录
-- **SSE 实时推送** - 实时推送请求事件到 Web 面板
-- **请求记录** - 记录查询、删除、清空、导出 JSON
-- **详情复制** - 一键复制 URL / Headers / Body / cURL
-- **过滤排序** - Method 过滤、Status 过滤、时间排序、耗时排序
-- **拦截规则** - Mock、模拟错误、延迟、流式中断、响应截断，按路径/方法匹配
-- **请求重放** - 改完参数直接重发上游，并与原响应做逐行差异对比
-- **敏感信息脱敏** - `authorization` / `cookie` / `api_key` 等默认打码，可一键看原文
-- **可选访问令牌** - `--token` 保护内部 API 与 SSE 事件流
-- **统一数据目录** - 配置与历史存放在用户级目录，与启动端口 / 工作目录无关，支持旧数据一键迁移
-- **逐层折叠** - JSON 对象/数组带折叠三角；SSE 响应按帧折叠，支持逐帧展开与全部折叠
-- **局域网共享** - 启动时打印可直接发给同事的 `Network` 地址（仅当监听地址真的对外可达时才展示）
-- **窄屏自适应** - 窗口收窄后历史请求折叠为可点菜单，内容区跟随父盒子缩放并横向滚动
-
-> [!WARNING]
-> **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发链路基于 `fetch()`，无法完成协议切换，
-> 所以握手请求会被**显式拒绝**：返回 `501 Not Implemented`、请求不会发往上游，
-> 面板同时记录一条 `501` 并写明原因。调试 WebSocket 请让客户端直连上游。
-
-## 快速开始
-
-### npm 仓库说明
-
-- 包名：`proxira`
-- npm 地址：`https://www.npmjs.com/package/proxira`
-- 命令名：`proxira`
-- 当前版本：`0.2.2`
-- 发布内容：`dist/`、`dashboard-dist/`、`README.md`
-
-推荐使用方式：
-
-```bash
-# 直接运行最新版本（推荐）
-npx proxira@latest
-
-# 固定版本运行（适合团队统一环境，请换成 npm 上的实际版本）
-npx proxira@0.2.2
-
-# 全局安装
-npm i -g proxira
-```
-
-### 方式 1：使用 npx（推荐，无需全局安装）
+本地开发联调用的实时请求代理与观测工具：把请求指向本地代理，它转发到真实上游，
+并在 Web 面板里实时展示请求、响应、耗时与错误。
 
 ```bash
 npx proxira
 ```
 
-### 方式 2：全局安装后使用
+启动后：
+
+- 代理入口 `http://localhost:3000/proxira`
+- 管理面板 `http://localhost:3000/_proxira/ui`
+
+## 安装与运行
 
 ```bash
+# 直接跑，不安装（推荐）
+npx proxira
+
+# 固定版本
+npx proxira@0.3.0
+
+# 全局安装
 npm i -g proxira
 proxira
 ```
 
-启动后默认地址：
+## 把请求接进来
 
-- 代理入口：`http://localhost:3000/proxira`（默认）
-- 管理面板：`http://localhost:3000/_proxira/ui`
-
-### 把请求接进来
-
-代理会把 `<代理入口>/<原路径>` 原样转发到 `<上游>/<原路径>`，所以接入时通常只要改 baseURL：
+代理把 `<代理入口>/<原路径>` 原样转发到 `<上游>/<原路径>`，所以接入通常只改 baseURL：
 
 ```bash
 # 原来
 curl https://api.example.com/v1/users
 
-# 接入后：把域名+端口换成代理地址，保留 /proxira 前缀
+# 接入后：换成代理地址，保留 /proxira 前缀
 curl http://127.0.0.1:3000/proxira/v1/users
 ```
 
 ```js
-// OpenAI / DeepSeek 这类 SDK，改 baseURL 即可（路径 /v1 保留在后面）
-import OpenAI from "openai";
-
+// OpenAI / DeepSeek 这类 SDK 改 baseURL 即可，路径 /v1 保留在后面
 const client = new OpenAI({
   baseURL: "http://127.0.0.1:3000/proxira/v1",
   apiKey: process.env.DEEPSEEK_API_KEY,
 });
 ```
 
-> [!TIP]
-> 若 SDK 或客户端强制使用 HTTPS，可用 `--https` 启动（配合 `gen-cert` 生成的自签名证书），
-> 或用 `-nx` 关闭前缀后把完整地址指向代理端口。
-
-## HTTPS 模式快速开始
+常用启动形式：
 
 ```bash
-# 1) 生成自签名证书（智能检测环境）
-npx proxira gen-cert
-
-# 2) 使用生成的证书启动 HTTPS 服务（自动检测默认证书位置）
-npx proxira --https
+npx proxira --port 3010 --target http://localhost:8080   # 指定端口和上游
+npx proxira -nx                                          # 关闭 /proxira 前缀，端口下全部转发
+npx proxira --host 0.0.0.0                               # 暴露到局域网（启动横幅会打印可用地址）
+npx proxira --token my-secret                            # 给内部 API 与 SSE 加访问令牌
 ```
 
-启动后访问：
-- 代理入口：`https://localhost:3000/proxira`
-- 管理面板：`https://localhost:3000/_proxira/ui`
-
-**注意**：使用自签名证书时，浏览器会提示安全警告，这是正常的。点击"高级" → "继续访问"即可。
-
-如果证书不在默认位置（`<数据目录>/certs/`），也可以手动指定：
+HTTPS（客户端强制 HTTPS 时用）：
 
 ```bash
-npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.pem
+npx proxira gen-cert      # 生成自签名证书
+npx proxira --https       # 用生成的证书启动
 ```
 
-## 命令格式
+## 核心能力
 
-```bash
-proxira [options]
-proxira clear-cache [options]
-proxira gen-cert [options]
-```
+- **透明转发** - 保留 Method / Path / Query / Headers / Body，支持 HTTP 与 HTTPS 上游
+- **实时观测** - SSE 推送，面板实时刷新；支持状态 / 方法筛选与耗时排序
+- **多转发地址** - 每个转发地址独立上游与历史，可配置独立超时
+- **拦截规则** - 按路径 / 方法 Mock 桩数据、模拟错误、注入延迟、流式中断、截断响应
+- **请求重放** - 改完参数直接重发上游，与原响应逐行差异对比
+- **正文查看** - JSON 树（搜索高亮 / 分页 / 节点复制）、源码视图、表格、SSE 逐帧、多格式高亮
+- **详情复制与导出** - 一键复制 URL / Headers / Body / cURL，历史导出 JSON
+- **敏感信息脱敏** - `authorization` / `cookie` / `api_key` 默认打码，可一键看原文
 
-## 可用参数
-
-### 通用参数
+## 参数
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `-p, --port <port>` | 代理端口 | `3000` |
 | `-t, --target <url>` | 上游服务地址 | `http://localhost:8080` |
-| `-d, --data-dir <path>` | 配置目录 | `./.proxira` |
+| `-d, --data-dir <path>` | 配置目录 | 用户级目录 |
 | `-x, --prefix <path>` | 自定义代理前缀 | `/proxira` |
 | `-nx, --no-prefix` | 关闭代理前缀 | - |
+| `--host <addr>` | 监听地址 | `127.0.0.1` |
+| `--token <token>` | 内部 API / SSE 访问令牌 | 关闭 |
 | `-b, --no-banner` | 关闭启动 Banner | - |
-| `--token <token>` | 为内部 API / SSE 设置访问令牌 | 关闭 |
-| `-h, --help` | 查看帮助 | - |
-| `-v, --version` | 查看版本 | - |
-
-### HTTPS 模式参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
 | `-s, --https` | 启用 HTTPS 服务模式 | - |
-| `--https-key <path>` | HTTPS 私钥文件路径 | - |
-| `--https-cert <path>` | HTTPS 证书文件路径 | - |
+| `--https-key / --https-cert <path>` | 指定证书（需成对） | - |
+| `-h, --help` / `-v, --version` | 帮助 / 版本 | - |
 
-### gen-cert 专用参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `-o, --output-dir <path>` | 证书输出目录 | `<数据目录>/certs` |
-| `-c, --common-name <name>` | 证书通用名 | `localhost` |
-| `--days <number>` | 证书有效期天数 | `365` |
-| `-y, --yes` | 跳过确认提示，直接执行 | - |
-
-### 子命令
+子命令：
 
 | 命令 | 说明 |
 |------|------|
-| `clear-cache` | 清除本地缓存（配置 + 历史记录） |
-| `gen-cert` | 生成自签名 HTTPS 证书（自动检测环境） |
-| `data-dir` | 显示当前数据目录位置及其来源（参数 / 环境变量 / 用户级默认） |
-| `migrate-data` | 把旧版工作目录下的 `.proxira` 数据迁移到统一数据目录（`--from` 可指定旧目录） |
-
-## 使用示例
-
-### 1) 最简单启动
-
-```bash
-npx proxira
-```
-
-将你的 SDK 或应用请求地址指向 `http://localhost:3000/proxira`，然后在面板查看请求与响应详情。
-
-### 2) 指定端口和上游
-
-```bash
-npx proxira --port 3010 --target http://localhost:8080
-```
-
-此时代理入口变为 `http://localhost:3010/proxira`，所有请求会转发到 `http://localhost:8080`。
-
-### 3) 自定义代理前缀
-
-```bash
-proxira -x /debug-proxy -t http://localhost:8080
-```
-
-此时代理入口变为 `http://localhost:3000/debug-proxy`。
-
-### 4) 关闭代理前缀
-
-```bash
-proxira -nx -t http://localhost:8080
-```
-
-此时除 `/_proxira/*` 之外的请求都会直接转发到上游。
-
-### 5) 指定配置目录
-
-```bash
-proxira --data-dir ./.proxira-dev
-```
-
-### 6) 关闭 Banner，适合脚本或日志收集
-
-```bash
-proxira -b
-```
-
-### 7) 智能证书生成
-
-```bash
-# 向导模式（推荐）
-npx proxira gen-cert
-
-# 一键生成，跳过确认
-npx proxira gen-cert --yes
-
-# 自定义配置
-npx proxira gen-cert -o ./my-certs -c myapp.local --days 730
-```
-
-### 8) HTTPS 模式启动
-
-```bash
-# 使用生成的证书（自动检测默认位置）
-npx proxira --https
-
-# 指定 HTTPS 端口
-npx proxira -s --port 3443
-
-# 手动指定证书路径（证书不在默认位置时使用）
-npx proxira --https --https-key ./my-certs/key.pem --https-cert ./my-certs/cert.pem
-```
-
-## 推荐使用流程
-
-1. 启动 Proxira。
-2. 将待联调请求指向 Proxira 端口。
-3. 打开 `/_proxira/ui` 实时查看请求与响应。
-4. 按需创建转发地址（一个转发地址对应一个上游地址和独立请求历史）。
-5. 在当前转发地址中调整上游地址继续联调。
-
-## 面板实用能力
-
-- 历史请求支持一键导出 JSON
-- 详情支持一键复制 URL / Headers / Body / cURL
-- 多转发地址管理，独立历史记录
-- 实时 SSE 推送请求事件
-- SSE 响应按帧折叠，可逐帧展开，也可「全部折叠 / 全部展开」
-- JSON 对象/数组左侧带折叠三角，一键收起不用来回滚
-- 窄屏（≤960px）下历史请求折叠为菜单，整行可点，折叠态右侧显示当前选中的请求
-- 内容区跟随父盒子缩放，超宽时在容器内部横向滚动，不会撑破布局
-- 流式响应按采样增量上屏（不为观测而完整缓冲，避免拖住请求）
-- 记录超过 500 条时可点「加载更多」继续翻页
-
-## 折叠、局域网、窄屏自适应
-
-### JSON 与 SSE 折叠
-
-- **JSON**：对象 / 数组左侧有折叠三角，点一下即可收起整个节点，不用拖着滚动条找配对的括号。
-- **SSE / 流式响应**：按帧展示，点某一帧的**标题行**就能收起/展开该帧，另有「全部折叠 / 全部展开」。
-  展开多帧时也能快速折叠，方便先扫标题定位、再看具体某一帧的 `data`。
-
-### 局域网共享
-
-启动时会打印可直接发给同事的地址（面板与代理入口各一条）：
-
-```text
-Network:  http://192.168.1.23:3000/_proxira/ui
-```
-
-- **仅当监听地址真的对外可达时才展示**。默认只监听 `127.0.0.1`，此时不会给出局域网地址——
-  因为同事根本连不上，展示只会误导。要共享请显式指定：
-
-  ```bash
-  npx proxira --host 0.0.0.0
-  ```
-
-- 会自动过滤掉链路本地地址（`169.254.x`，没拿到 DHCP 时才有）和 `198.18.x`
-  （RFC 2544 保留段，Surge / Clash 的 fake-ip 会把它挂成虚拟网卡，不是真实网卡）。
-- ⚠️ 暴露到局域网意味着同一网络内任何人都能看到你的请求内容，请只在可信网络里开，必要时配合 `--token`。
-
-### 窄屏自适应
-
-窗口收窄（≤960px）时面板会自动重排，方便和其他窗口并排使用：
-
-- 标题与转发地址卡片**合并到同一行**，省出纵向空间；
-- 历史请求折叠为**可点菜单**：整行都是热区（不只是文字），折叠态右侧直接显示当前选中的请求，点开才做详细交互；
-- 内容区不再固定宽度，跟随父盒子缩放，被压缩时**在容器内部横向滚动**，不会撑破布局；
-- 按钮文案强制单行，窄屏也不会折行。
-
-## 转发地址级超时
-
-在面板「编辑当前转发地址」里可单独设置上游超时（毫秒），留空则回落到全局的
-`PROXY_UPSTREAM_TIMEOUT_MS`（默认 30s）。适合某个上游特别慢、又不想把全局超时调大的场景。
-
-## 拦截规则（Mock / 故障注入）
-
-规则挂在转发地址上，按「路径包含 + 方法」匹配，命中的请求不再打上游：
-
-| 动作 | 作用 | 典型场景 |
-| --- | --- | --- |
-| `mock` | 返回预设状态码与 body，可勾选以 SSE 分片下发 | 上游还没写好、想固定返回内容 |
-| `error` | 直接以指定状态码失败，不请求上游 | 复现 5xx / 网关错误 |
-| `delay` | 先等待 N 毫秒再正常转发 | 复现慢请求、验证前端 loading |
-| `break_stream` | 流式响应在第 N 个分片后断开 | 复现 SSE / LLM 流式中断 |
-| `truncate` | 只保留响应前 N 字节后断开 | 复现响应截断、JSON 解析失败 |
-
-面板工具栏「拦截规则」可增删改与启停，停用后立刻恢复真实转发；命中的记录会带「规则」标记。
-
-## 请求重放与差异对比
-
-选中记录后点「重放请求」，表单已按原请求预填，可直接改参数再发送；结果会展示状态码、耗时，
-以及与原响应的逐行差异。重放**不经过拦截规则**，看到的始终是上游真实行为；结果写入历史并标记「重放」。
-
-## 敏感信息脱敏
-
-默认对展示层打码，不改落盘数据：Headers 中的 `authorization` / `cookie` / `x-api-key` 等键、
-JSON 正文中同名键的值、文本正文里的 `Authorization: Bearer ...` 片段。复制 cURL 同样遵循当前脱敏状态，
-点工具栏眼睛图标可在「脱敏 / 原文」间切换。
-
-## 访问令牌（可选）
-
-```bash
-npx proxira --token my-secret
-```
-
-启用后 `/_proxira/api/*`（含 SSE）必须携带令牌，否则 401；可通过 `Authorization: Bearer my-secret`
-或 `?token=my-secret` 传入。面板打开时带一次 `?token=my-secret` 即可，令牌会存在 `sessionStorage`。
-面板 HTML 与 JS/CSS 静态资源不校验令牌（浏览器无法给 `<script>`/`<link>` 加头），但缺令牌时接口全 401，页面只会是空的。
-
-## 数据存放位置
-
-数据目录与启动端口、启动方式、工作目录无关，按优先级统一解析：
-
-1. `--data-dir <path>` 参数（相对路径相对当前目录解析）
-2. `PROXY_DATA_DIR` 环境变量
-3. 用户级默认目录：macOS `~/Library/Application Support/Proxira`，Linux `$XDG_DATA_HOME/Proxira`（默认 `~/.local/share/Proxira`），Windows `%APPDATA%\Proxira`
-
-默认目录内容：
-
-| 文件 | 内容 |
-| --- | --- |
-| `config.json` | 转发地址配置、当前激活转发地址 |
-| `history.json` | 按转发地址分桶的请求历史 |
-| `rules.json` | 各转发地址的拦截规则 |
-| `instance.json` | 运行实例锁（PID / 端口，用于检测同目录多实例） |
-| `certs/` | HTTPS 自签名证书 |
-
-启动 Banner 会显示当前数据目录及其来源；`proxira data-dir` 可随时查看。
-
-> 旧版本默认把数据写在启动目录下的 `./.proxira/`。启动时若在当前目录检测到旧目录且有数据，会打印迁移提示；执行 `proxira migrate-data` 即可把配置 / 历史 / 规则 / 证书复制到统一目录，历史不会丢。
-
-历史是防抖落盘的，进程退出前会强制刷盘；`proxira clear-cache` 可一次性清空配置与历史。
-
-## 可选环境变量
-
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
+| `gen-cert` | 生成自签名证书（`-o` 输出目录、`-c` 通用名、`--days` 有效期、`-y` 跳过确认） |
+| `clear-cache` | 清空本地配置与历史 |
+| `data-dir` | 显示当前数据目录及其来源 |
+| `migrate-data` | 把旧版工作目录下的 `.proxira` 迁移到统一数据目录 |
+
+## 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
 | `PORT` | 服务端口 | `3000` |
-| `PROXY_TARGET_URL` | 默认转发地址上游地址 | `http://localhost:8080` |
-| `PROXY_DATA_DIR` | 本地数据目录 | `./.proxira` |
-| `PROXY_PREFIX` | 代理请求前缀 | `/proxira` |
-| `PROXY_PREFIX_ENABLED` | 关闭代理请求前缀 | 未设置 |
+| `PROXY_TARGET_URL` | 上游地址 | `http://localhost:8080` |
 | `PROXY_HOST` | 监听地址 | `127.0.0.1` |
-| `PROXY_UPSTREAM_TIMEOUT_MS` | 上游请求超时（毫秒），超时返回 504 | `30000` |
-| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条**非流式**正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
-| `PROXY_STREAM_MAX_CAPTURE_BYTES` | 流式响应（SSE / multipart）捕获字节上限，`0` = 不限制 | `0` |
-| `PROXY_STREAM_MAX_CAPTURE_MS` | 流式响应采样时长上限（毫秒），`0` = 不限制 | `0` |
-| `PROXY_PERSIST_DEBOUNCE_MS` | 落盘防抖间隔（毫秒） | `500` |
-| `PROXY_HISTORY_LIMIT` | 内存历史记录上限 | `1000` |
-| `PROXY_HISTORY_PERSIST_LIMIT` | 持久化历史记录上限 | `200` |
-| `PROXY_HISTORY_PERSIST_BODY_LIMIT` | 落盘时单条正文重新裁剪上限（内存仍保留完整内容） | `65536` |
-| `PROXY_ACCESS_TOKEN` | 内部 API / SSE 的访问令牌，未设置则不做校验 | - |
-| `PROXY_QUERY_LIMIT_MAX` | 记录查询接口最大分页值 | - |
-| `PROXY_SSE_HEARTBEAT_MS` | SSE 心跳间隔（毫秒） | - |
-| `PROXY_DISABLE_BANNER` | 关闭启动 Banner | 未设置 |
+| `PROXY_DATA_DIR` | 数据目录 | 用户级目录 |
+| `PROXY_PREFIX` / `PROXY_PREFIX_ENABLED` | 代理前缀 / 关闭前缀 | `/proxira` |
+| `PROXY_UPSTREAM_TIMEOUT_MS` | 等待上游响应头的超时，超时返回 504 | `30000` |
+| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条**非流式**正文记录上限 | `2097152` |
+| `PROXY_STREAM_MAX_CAPTURE_BYTES` | 流式响应捕获字节上限，`0` = 不限制 | `0` |
+| `PROXY_STREAM_MAX_CAPTURE_MS` | 流式响应采样时长上限，`0` = 不限制 | `0` |
+| `PROXY_HISTORY_LIMIT` | 内存历史条数上限 | `1000` |
+| `PROXY_HISTORY_PERSIST_LIMIT` | 落盘历史条数上限 | `200` |
+| `PROXY_HISTORY_PERSIST_BODY_LIMIT` | 落盘时单条正文裁剪上限（内存仍完整） | `65536` |
+| `PROXY_ACCESS_TOKEN` | 内部 API / SSE 访问令牌 | - |
 | `PROXY_HTTPS_ENABLED` | 启用 HTTPS 服务模式 | 未设置 |
-| `PROXY_HTTPS_KEY_PATH` | HTTPS 私钥文件路径 | - |
-| `PROXY_HTTPS_CERT_PATH` | HTTPS 证书文件路径 | - |
 
-## 从源码开发
-
-> 以下仅面向参与本仓库开发的场景；作为 npm 包使用不需要看这节。
-
-本包是 monorepo 的发布主体，开发命令在**仓库根目录**执行：
-
-```bash
-pnpm install          # 安装依赖
-pnpm dev              # 后端 watch(:3000) + 面板 dev server(:5173)，并行
-pnpm build            # 构建发布产物（dashboard → dashboard-dist → tsc）
-pnpm test             # 运行测试
-pnpm run pack:app     # 构建并生成 tarball 到仓库根目录（本地验证发布产物）
-```
+## 注意事项
 
 > [!WARNING]
-> 不要在根目录直接敲 `pnpm pack` / `pnpm publish` —— 这两个是 **pnpm 内置命令**，作用于根包
-> （`proxira-monorepo`，`private: true`），不会带上 `run`，也发不出真正的包。
+> **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发基于 `fetch()`，无法完成协议切换，
+> 握手请求会被**显式拒绝**：返回 `501 Not Implemented`、不转发、面板记录写明原因。
+> 调试 WebSocket 请让客户端直连上游。
 
-> [!TIP]
-> `pnpm dev` 跑的是 `src/index.ts` 而不是 `cli.ts`，**`-p` / `-t` / `--host` 这类 CLI 参数不会被解析**
-> （`cli.ts` 的工作正是把参数转成环境变量再启动服务）。开发时调参请用环境变量：
->
-> ```bash
-> PORT=4000 pnpm dev
-> PORT=4000 PROXY_TARGET_URL=http://127.0.0.1:8080 pnpm dev:server
-> ```
+> [!NOTE]
+> - 定位是本地开发调试工具，请勿直接暴露公网。
+> - 默认只监听 `127.0.0.1`；需要局域网访问用 `--host 0.0.0.0`。
+> - 默认会记录完整请求/响应正文，联调真实数据请注意敏感信息。
+> - 非流式正文超过 `PROXY_MAX_BODY_CAPTURE_BYTES` 才截断（只截记录，转发始终完整）；
+>   流式响应**默认全量捕获**。
+> - `PROXY_UPSTREAM_TIMEOUT_MS` 只管「等响应头」，长 SSE / LLM 流不会被掐断。
+> - 落盘是原子写；若配置文件损坏会改名成 `*.corrupt-<时间戳>` 保留证据，再重建空数据。
 
 ## 常见问题
 
 **面板打不开 / 白屏**
-若启动时带了 `--token`，面板地址要补一次 `?token=你的令牌`（之后会存在 `sessionStorage`）。
-令牌不对时接口返回 401，页面只能看到空壳。
+带了 `--token` 时，面板地址要补一次 `?token=你的令牌`（之后存在 `sessionStorage`）。
 
 **请求没出现在面板里**
-- 确认请求带了代理前缀（默认 `/proxira`），或已用 `-nx` 关闭前缀；
-- 确认当前激活转发地址的上游地址是你以为的那个（面板顶部可切换）；
-- 确认服务监听地址可达（默认只监听 `127.0.0.1`）。
+确认带了 `/proxira` 前缀（或已 `-nx`）、当前激活转发地址的上游是你以为的那个、监听地址可达。
 
 **502 和 504 的区别**
-`502` 是连不上上游或上游提前断开；`504` 是上游在 `PROXY_UPSTREAM_TIMEOUT_MS`（或转发地址级超时）内没响应。
+`502` 是连不上上游或上游提前断开；`504` 是上游在超时内没返回响应头。
 
-**流式响应（SSE）的正文为什么是空的 / 被截断了**
-- 正在进行的流：面板每秒增量上屏，刚发起的瞬间可能还没有内容，稍等即可。
-- 默认**不会因为太长而截断**：流式响应走独立的 tee 分支全量捕获，客户端读取不受影响。
-- 若你显式设置了 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`，超过后会停止捕获并标记 `truncated`。
-- 长流**不会被上游超时掐断**：`PROXY_UPSTREAM_TIMEOUT_MS` 只管「等响应头」，响应头一到就解除，流可以一直跑。
-- 重启后看到的是落盘版本：落盘会按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积。
-  想让历史也保留完整正文，把它设为 `0`（注意文件会随之变大）。
+**流式响应正文为空 / 被截断**
+进行中的流每秒增量上屏，稍等即可；默认不截断，除非你显式设了
+`PROXY_STREAM_MAX_CAPTURE_BYTES` / `_MS`；重启后看到的是落盘版本，会按
+`PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪，想保留完整正文把它设为 `0`。
 
-**配置文件损坏 / 历史突然空了**
-落盘走「写临时文件 → 原子改名」，所以正常退出不会留下半截文件。若 `history.json` 因外部原因损坏，
-启动时会被改名成 `history.json.corrupt-<时间戳>` 保留证据，再用空数据重建——不会静默把原文件覆盖掉。
+**数据存在哪**
+用户级统一目录（与端口、工作目录无关）。`proxira data-dir` 可查看，
+`proxira migrate-data` 可迁移旧数据，`proxira clear-cache` 可清空。
 
-**WebSocket 连不上 / 面板里出现 501**
-Proxira **不支持 WebSocket 转发**。握手请求（`Connection: Upgrade` + `Upgrade: websocket`）会被立即拒绝：
-返回 `501 Not Implemented`，请求不会发往上游，面板记录里也会写明「未转发到上游」。
-这是刻意设计——早期版本会静默降级成普通 GET（面板显示 200、客户端却连不上），排查成本极高。
-调试 WebSocket 请让客户端直连上游地址。
+## 更多
 
-**启动信息里没有局域网地址**
-默认只监听 `127.0.0.1`，局域网内其他机器连不上，所以不会展示。需要共享时用 `--host 0.0.0.0`
-（或环境变量 `PROXY_HOST=0.0.0.0`）重启，横幅就会出现 `Network` 行。
-
-**历史记录太多想翻更早的**
-面板单次加载 500 条，列表底部点「加载更多」可按 offset 继续翻页。
-
-## 注意事项
-
-- 该工具定位为本地开发调试工具，请勿直接暴露公网使用。
-- 默认会记录请求与响应内容，请注意敏感信息处理。
-- 管理面板和内部 API 固定使用 `/_proxira/*`，自定义前缀只影响业务代理入口。
-
-## 更新日志
-
-### 0.2.2
-
-- JSON 对象/数组新增折叠三角；SSE 响应改为按帧折叠，支持逐帧展开与「全部折叠 / 全部展开」。
-- 启动横幅新增 `Network` 行，展示可直接共享给同事的局域网地址（监听回环时不展示）。
-- 窄屏自适应：标题与转发地址同行、历史请求折叠为可点菜单（折叠态右侧显示当前选中请求）、内容区跟随父盒缩放并横向滚动。
-- 细节修正：按钮文案强制单行、窄屏「清除 / 导出 JSON」同行、折叠三角 hover 不再遮挡文字、隐藏的 tooltip 不再撑出横向滚动条、详情区按钮固定右侧。
-
-### 0.2.1
-
-- 分组改名为「转发地址」（仅展示层）。
-- 新增转发地址级超时、拦截规则、请求重放与差异对比、敏感信息脱敏、访问令牌。
+开发、测试、发布与完整更新日志见仓库根目录 README：
+<https://github.com/oceanDeep512/proxira#readme>
 
 ## License
 
