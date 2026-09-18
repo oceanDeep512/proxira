@@ -456,8 +456,13 @@ pnpm run pack:app     # 构建并生成 tarball 到仓库根目录（本地验�
 - 正在进行的流：面板每秒增量上屏，刚发起的瞬间可能还没有内容，稍等即可。
 - 默认**不会因为太长而截断**：流式响应走独立的 tee 分支全量捕获，客户端读取不受影响。
 - 若你显式设置了 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`，超过后会停止捕获并标记 `truncated`。
+- 长流**不会被上游超时掐断**：`PROXY_UPSTREAM_TIMEOUT_MS` 只管「等响应头」，响应头一到就解除，流可以一直跑。
 - 重启后看到的是落盘版本：落盘会按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积。
   想让历史也保留完整正文，把它设为 `0`（注意文件会随之变大）。
+
+**配置文件损坏 / 历史突然空了**
+落盘走「写临时文件 → 原子改名」，所以正常退出不会留下半截文件。若 `history.json` 因外部原因损坏，
+启动时会被改名成 `history.json.corrupt-<时间戳>` 保留证据，再用空数据重建——不会静默把原文件覆盖掉。
 
 **WebSocket 连不上 / 面板里出现 501**
 Proxira **不支持 WebSocket 转发**。握手请求（`Connection: Upgrade` + `Upgrade: websocket`）会被立即拒绝：

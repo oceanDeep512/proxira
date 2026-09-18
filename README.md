@@ -49,6 +49,9 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 > 流式响应（SSE 等）**默认全量捕获、不按长度截断**：客户端读取走独立的 tee 分支不受影响，面板每秒增量上屏，
 > 流结束后可拿到完整内容；需要重新加上限用 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`。
 > 落盘时仍按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积，内存中始终是完整的。
+>
+> `PROXY_UPSTREAM_TIMEOUT_MS` 只约束「等待上游响应头」这一段；响应头到达后如果是流式响应，超时即解除，
+> 因此长 SSE / LLM 流不会因为跑过 30 秒而被掐断（采集时长另由 `PROXY_STREAM_MAX_CAPTURE_MS` 控制）。
 
 > [!WARNING]
 > **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发链路基于 `fetch()`，无法完成协议切换，
