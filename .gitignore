@@ -24,5 +24,11 @@ apps/getway/dashboard-dist/
 .vscode/
 .DS_Store
 
+# Brand assets (logo package, guidelines, exported png): kept locally, not part
+# of the published source tree.
+brand/
+*.ttf
+*.otf
+
 # WorkBuddy workspace data
 .workbuddy/
