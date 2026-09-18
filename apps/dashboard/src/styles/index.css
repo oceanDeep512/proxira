@@ -496,6 +496,29 @@
   color: var(--px-method-patch);
 }
 
+/* ---- 源码视图（还原控制台风格） ---------------------------------------- */
+.code-row:hover {
+  background: color-mix(in srgb, var(--px-accent) 6%, transparent);
+}
+
+.code-mark {
+  background: color-mix(in srgb, var(--px-warning) 34%, transparent);
+  border-radius: 2px;
+  color: inherit;
+}
+
+.code-mark-active {
+  background: var(--px-accent);
+  color: var(--px-accent-fg);
+  border-radius: 2px;
+}
+
+/* 折叠省略标记：紧跟在被折叠行后面 */
+.code-fold-hint {
+  font-style: normal;
+  color: var(--px-text-dim);
+}
+
 /* ---- JSON 树 ------------------------------------------------------------ */
 .json-tree {
   font-family: var(--px-font-mono);

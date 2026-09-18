@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Braces, Copy, Download, Search, UnfoldVertical } from "lucide-react";
 import type { BodyView } from "../../lib/body";
 import {
@@ -17,7 +17,7 @@ import { IconButton } from "../ui/IconButton";
 import { Pill } from "../ui/Pill";
 import { Segmented } from "../ui/Segmented";
 import { Tooltip } from "../ui/Tooltip";
-import { CodeBlock, languageForMode } from "./CodeBlock";
+import { CodeViewer, languageForMode } from "./CodeViewer";
 import { CsvTable } from "./CsvTable";
 import { JsonTree } from "./JsonTree";
 import { SseEventList } from "./SseEventList";
@@ -40,6 +40,7 @@ export const BodyViewer = ({
   copyLabel: string;
 }) => {
   const { copy } = useCopy();
+  const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
   // mode / query 都属于「这条记录」的视图状态：换记录必须重置，
@@ -81,15 +82,32 @@ export const BodyViewer = ({
     : view.text;
 
   const tooLarge = sizeBytes > LARGE_BYTES && !expanded;
+
+  // 和浏览器控制台一致：⌘F / Ctrl+F 直接聚焦正文搜索框，Esc 清空退出。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const input = searchRef.current;
+      if (!input) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        input.focus();
+        input.select();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const lineCount = useMemo(() => rawText.split("\n").length, [rawText]);
 
   // 单独提出来，避免深层三元嵌套里数错括号（可读性也比内联好）。
   const rawNode = rawText ? (
-    <CodeBlock
+    <CodeViewer
       code={rawText}
       language={languageForMode(view.mode)}
       query={query}
       maxHeight={560}
+      copyLabel={copyLabel}
       toolbarExtra={
         jsonFallback ? (
           <button
@@ -145,8 +163,16 @@ export const BodyViewer = ({
           <label className="relative flex items-center">
             <Search className="pointer-events-none absolute left-2 size-3 text-fg-dim" />
             <input
+              ref={searchRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setQuery("");
+                  event.currentTarget.blur();
+                }
+              }}
               placeholder="搜索内容…"
               aria-label={`在${copyLabel}中搜索`}
               className={cn(
@@ -167,15 +193,18 @@ export const BodyViewer = ({
             />
           ) : null}
 
-          <Tooltip label={`复制${copyLabel}`}>
-            <IconButton
-              label={`复制${copyLabel}`}
-              className="size-7 [&_svg]:size-3.5"
-              onClick={() => void copy(copyLabel, bodyViewToCopyText(view))}
-            >
-              <Copy />
-            </IconButton>
-          </Tooltip>
+          {/* 原始视图的代码面板自带复制按钮，这里就不再重复一个 */}
+          {activeMode === "raw" ? null : (
+            <Tooltip label={`复制${copyLabel}`}>
+              <IconButton
+                label={`复制${copyLabel}`}
+                className="size-7 [&_svg]:size-3.5"
+                onClick={() => void copy(copyLabel, bodyViewToCopyText(view))}
+              >
+                <Copy />
+              </IconButton>
+            </Tooltip>
+          )}
           <Tooltip label="保存为文件">
             <IconButton
               label="保存为文件"
