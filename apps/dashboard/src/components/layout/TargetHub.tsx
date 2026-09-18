@@ -33,6 +33,9 @@ export const TargetHub = ({
         // 同上：高度固定、不伸缩，否则纵向布局里会被拉伸。
         "px-panel flex min-w-0 shrink-0 grow-0 basis-auto flex-col gap-2.5 border-b border-line px-3 py-2.5",
         "panel:w-full",
+        // 双栏下与右侧「详情标题栏(88) + 分区 tab 栏(45)」等高，两条分隔线对齐。
+        // 只设 min-h：内容真变高时照常增高，不会被裁。
+        "panel:min-h-[133px]",
       )}
     >
       {/* 标题字号与「历史请求」等面板标题一致（font-display 15px semibold）。
