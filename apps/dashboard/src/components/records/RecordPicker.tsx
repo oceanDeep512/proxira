@@ -22,27 +22,22 @@ export const RecordPicker = ({ className }: { className?: string }) => {
 
   return (
     <>
-      {/* 宽度由父行按 3:1 分配（flex-1 + max-w-[280px]），只设下限 min-w-[96px]：
-          空间足时变宽并显示当前选中的请求，空间紧时收到底宽、截断文字。 */}
+      {/* 宽度：flex-1 参与父行的 3:1 分配，上限 max-w-[280px]；
+          下限用 min-w-fit —— 最小宽度由「历史请求 + 条数」的固有宽度决定，
+          条数变多（23 → 1234）按钮自动变宽，不会写死一个值。
+          overflow-hidden 兜底：真被压到比内容还窄时截断而不是把文字顶出去。 */}
       <Button
         size="sm"
         variant="secondary"
-        className={cn("min-w-[96px]", className)}
+        className={cn("min-w-fit overflow-hidden", className)}
         onClick={() => setOpen(true)}
         aria-label="打开历史请求列表"
         title={selected ? `当前：${selected.method} ${selected.path}` : "选择一条历史请求"}
       >
         <History className="size-3.5 shrink-0" />
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">历史请求</span>
-          <span className="shrink-0 font-mono text-fg-dim">{records.length}</span>
-          {/* 只有够宽（≥700）才补上当前选中的请求，否则按钮是空的宽块。 */}
-          {selected ? (
-            <span className="hidden min-w-0 truncate text-fg-dim hub:inline">
-              {selected.method} {selected.path}
-            </span>
-          ) : null}
-        </span>
+        <span className="min-w-0 truncate">历史请求</span>
+        {/* 条数是关键信息，不可被截断，所以 shrink-0。 */}
+        <span className="shrink-0 font-mono text-fg-dim">{records.length}</span>
       </Button>
 
       <Modal

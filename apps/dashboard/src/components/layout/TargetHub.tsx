@@ -49,11 +49,12 @@ export const TargetHub = ({
       {/* 这一行承担全部宽度分配，宽度不够时靠 flex-wrap 把功能按钮排挤到下一行：
           - 下拉 flex-[3] / 历史请求 flex-1：剩余宽度按 3:1 分，不再让下拉独占
             （900px 时约 500 : 168，此前是 769 : 118）
-          - 下拉 min-w-[180px] 是换行阈值：宽屏左栏只有 ~282px，
-            下拉 + 功能排放不进去 → 功能排自动换到下一行，还原成宽屏的两行布局
-          - 历史请求 min-w 96 / max-w 280：极窄时收住，宽时也不会膨胀成空按钮 */}
+          - 下拉 min-w-[160px] 是换行阈值：宽屏左栏只有 ~282px，
+            下拉 + 功能排放不进去 → 功能排自动换到下一行，还原成宽屏的两行布局；
+            同时它要保证 360px 下「下拉 + 历史请求 + 折叠按钮」仍能挤在一行
+          - 历史请求 min-w-fit / max-w 280：下限跟着文字走，上限不让它膨胀成空按钮 */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-[180px] flex-[3]">
+        <div className="min-w-[160px] flex-[3]">
           <Select
             label="选择转发地址"
             value={currentId}
