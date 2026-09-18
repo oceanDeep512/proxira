@@ -48,6 +48,11 @@ Proxira 是一个**本地开发联调用的实时请求代理与观测工具**�
 - **局域网共享** - 启动时打印可直接发给同事的 `Network` 地址（仅当监听地址真的对外可达时才展示）
 - **窄屏自适应** - 窗口收窄后历史请求折叠为可点菜单，内容区跟随父盒子缩放并横向滚动
 
+> [!WARNING]
+> **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发链路基于 `fetch()`，无法完成协议切换，
+> 所以握手请求会被**显式拒绝**：返回 `501 Not Implemented`、请求不会发往上游，
+> 面板同时记录一条 `501` 并写明原因。调试 WebSocket 请让客户端直连上游。
+
 ## 快速开始
 
 ### npm 仓库说明
@@ -453,6 +458,12 @@ pnpm run pack:app     # 构建并生成 tarball 到仓库根目录（本地验�
 - 若你显式设置了 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`，超过后会停止捕获并标记 `truncated`。
 - 重启后看到的是落盘版本：落盘会按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积。
   想让历史也保留完整正文，把它设为 `0`（注意文件会随之变大）。
+
+**WebSocket 连不上 / 面板里出现 501**
+Proxira **不支持 WebSocket 转发**。握手请求（`Connection: Upgrade` + `Upgrade: websocket`）会被立即拒绝：
+返回 `501 Not Implemented`，请求不会发往上游，面板记录里也会写明「未转发到上游」。
+这是刻意设计——早期版本会静默降级成普通 GET（面板显示 200、客户端却连不上），排查成本极高。
+调试 WebSocket 请让客户端直连上游地址。
 
 **启动信息里没有局域网地址**
 默认只监听 `127.0.0.1`，局域网内其他机器连不上，所以不会展示。需要共享时用 `--host 0.0.0.0`

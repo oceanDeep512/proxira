@@ -50,6 +50,12 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 > 流结束后可拿到完整内容；需要重新加上限用 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`。
 > 落盘时仍按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积，内存中始终是完整的。
 
+> [!WARNING]
+> **不支持 WebSocket（及其他 HTTP Upgrade 协议）**。转发链路基于 `fetch()`，无法完成协议切换，
+> 所以 WebSocket 握手会被**显式拒绝**：返回 `501 Not Implemented`，请求不会发往上游，
+> 面板同时记录一条 `501` 并写明原因——不会像以前那样静默降级成普通 GET（面板显示 200、客户端却连不上）。
+> 需要调试 WebSocket 时请让客户端直连上游。
+
 ## 折叠、局域网共享与窄屏自适应
 
 - **JSON / SSE 折叠**：JSON 对象与数组带折叠三角；SSE 响应按帧展示，点标题行收起/展开单帧，另有「全部折叠 / 全部展开」。
