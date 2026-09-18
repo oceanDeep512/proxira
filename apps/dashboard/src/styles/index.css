@@ -57,12 +57,15 @@
 
 /* ---- 浅色（默认写在 :root，深色在下面覆盖） ---------------------------- */
 :root {
-  --px-font-sans: "Sora Variable", "Sora", "PingFang SC", "Hiragino Sans GB",
-    "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  --px-font-display: "Space Grotesk Variable", "Space Grotesk", "PingFang SC",
-    "Noto Sans SC", sans-serif;
-  --px-font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Iosevka",
-    "SFMono-Regular", "Menlo", monospace;
+  --px-font-sans:
+    "Sora Variable", "Sora", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --px-font-display:
+    "Space Grotesk Variable", "Space Grotesk", "PingFang SC", "Noto Sans SC",
+    sans-serif;
+  --px-font-mono:
+    "JetBrains Mono Variable", "JetBrains Mono", "Iosevka", "SFMono-Regular",
+    "Menlo", monospace;
 
   --px-bg: #eef2f8;
   --px-bg-soft: #e2e9f3;
@@ -161,7 +164,7 @@
   html,
   body,
   #app {
-    height: 100%;
+    height: 100vh;
     /* 桌面软件式：页面本身永不滚动，滚动只发生在列表 / 正文内部。
        所有面板都被锁在 100dvh 内，各自的滚动容器自己负责 overflow。 */
     overflow: hidden;
@@ -187,7 +190,11 @@
     pointer-events: none;
     background-image:
       radial-gradient(58rem 34rem at 8% -8%, var(--px-glow-a), transparent 62%),
-      radial-gradient(48rem 30rem at 104% 8%, var(--px-glow-b), transparent 60%),
+      radial-gradient(
+        48rem 30rem at 104% 8%,
+        var(--px-glow-b),
+        transparent 60%
+      ),
       linear-gradient(168deg, var(--px-bg) 0%, var(--px-bg-soft) 100%);
   }
 
@@ -570,7 +577,9 @@
   background: none;
   color: var(--px-text-dim);
   cursor: pointer;
-  transition: transform 130ms ease, color 130ms ease;
+  transition:
+    transform 130ms ease,
+    color 130ms ease;
 }
 
 .json-caret:hover {
