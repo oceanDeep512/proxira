@@ -54,6 +54,26 @@ export const isStreamingContentType = (contentType: string | null): boolean => {
   return STREAMING_MIME_TYPES.has(mimeType);
 };
 
+// A request asking to switch protocols (WebSocket handshake, h2c, ...).
+// Forwarding is built on fetch(), which can never complete an upgrade: it has
+// no way to hand back the socket behind a 101 response. Detect these up front
+// so we can refuse them outright instead of silently stripping the hop-by-hop
+// headers and turning the handshake into a plain GET.
+export const describeUpgradeProtocol = (headers: Headers): string | null => {
+  const upgrade = headers.get("upgrade")?.trim();
+  if (!upgrade) {
+    return null;
+  }
+  const connection = headers.get("connection")?.toLowerCase() ?? "";
+  const wantsUpgrade = connection
+    .split(",")
+    .some((token) => token.trim() === "upgrade");
+  if (!wantsUpgrade) {
+    return null;
+  }
+  return upgrade.toLowerCase();
+};
+
 // Tabular payloads are labelled up front so the dashboard can render them as
 // a table without guessing from the raw text.
 const looksLikeCsv = (text: string): boolean => {

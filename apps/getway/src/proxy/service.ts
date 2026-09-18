@@ -1,6 +1,8 @@
 import type {
   ProxyGroup,
+  ProxyHeaders,
   ProxyPayloadBody,
+  ProxyQueryParams,
   ProxyRule,
   ProxyTrafficRecord,
 } from "@proxira/core";
@@ -12,11 +14,12 @@ import {
   buildUpstreamUrl,
   collectBody,
   collectHeaders,
-  collectQuery,
-  isStreamingContentType,
-  stripHeaders,
-  REQUEST_STRIP_HEADERS,
-} from "../shared/http.js";
+    collectQuery,
+    describeUpgradeProtocol,
+    isStreamingContentType,
+    stripHeaders,
+    REQUEST_STRIP_HEADERS,
+  } from "../shared/http.js";
 
 const isTimeoutError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") {
@@ -185,6 +188,25 @@ export class ProxyService {
     const requestHeaders = collectHeaders(request.headers);
     const query = collectQuery(incomingUrl);
 
+    // A protocol switch (WebSocket handshake and friends) can never survive
+    // fetch(): we would strip the hop-by-hop headers, forward a plain GET and
+    // hand the client a 200 while its handshake fails — a silent failure that
+    // reads as success in the dashboard. Refuse it loudly instead.
+    const upgradeProtocol = describeUpgradeProtocol(request.headers);
+    if (upgradeProtocol) {
+      return this.rejectUpgrade({
+        protocol: upgradeProtocol,
+        startedAtMs,
+        activeGroup,
+        method,
+        path: incomingUrl.pathname,
+        query,
+        requestHeaders,
+        requestBody,
+        upstreamUrl: upstreamUrl.toString(),
+      });
+    }
+
     const upstreamRequestHeaders = stripHeaders(request.headers, REQUEST_STRIP_HEADERS);
     upstreamRequestHeaders.delete("accept-encoding");
 
@@ -339,6 +361,58 @@ export class ProxyService {
         { status: timedOut ? 504 : 502 },
       );
     }
+  }
+
+  // A protocol switch (WebSocket handshake, h2c, ...) cannot be forwarded:
+  // fetch() has no way to return the socket behind a 101, and the hop-by-hop
+  // strip would silently downgrade the handshake into a plain GET — the client
+  // fails while the dashboard records a healthy 200. Refuse it explicitly so
+  // both sides agree that nothing was forwarded.
+  private rejectUpgrade(ctx: {
+    protocol: string;
+    startedAtMs: number;
+    activeGroup: ProxyGroup;
+    method: string;
+    path: string;
+    query: ProxyQueryParams;
+    requestHeaders: ProxyHeaders;
+    requestBody: ProxyPayloadBody;
+    upstreamUrl: string;
+  }): Response {
+    const protocol = ctx.protocol.toLowerCase();
+    const isWebSocket = protocol === "websocket";
+    const message = isWebSocket
+      ? "Proxira does not support WebSocket forwarding. The handshake was refused and never reached the upstream; point the client at the upstream directly."
+      : `Proxira does not support "${protocol}" protocol upgrades. The request was refused and never reached the upstream.`;
+
+    this.runtime.addProxyRecord(
+      ctx.activeGroup.id,
+      this.createRecord({
+        groupId: ctx.activeGroup.id,
+        method: ctx.method,
+        path: ctx.path,
+        query: ctx.query,
+        requestHeaders: ctx.requestHeaders,
+        requestBody: ctx.requestBody,
+        upstreamUrl: ctx.upstreamUrl,
+        responseStatus: 501,
+        responseHeaders: {},
+        responseBody: null,
+        durationMs: this.deps.now() - ctx.startedAtMs,
+        error: message,
+        appliedRuleId: null,
+        source: "proxy",
+      }),
+    );
+
+    return Response.json(
+      {
+        message: "Protocol upgrade is not supported by Proxira.",
+        protocol,
+        error: message,
+      },
+      { status: 501 },
+    );
   }
 
   // Background sampling for streaming responses: fills the record's body once

@@ -1018,4 +1018,78 @@ const hangingUpstream = (): typeof fetch =>
     });
   });
 
+  describe("protocol upgrade (WebSocket) requests", () => {
+    const handshakeHeaders = {
+      connection: "Upgrade",
+      upgrade: "websocket",
+      "sec-websocket-version": "13",
+      "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+    };
+
+    it("refuses a WebSocket handshake with 501 instead of downgrading it to a GET", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("plain body"));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      const response = await app.request("/proxira/socket", {
+        headers: handshakeHeaders,
+      });
+
+      expect(response.status).toBe(501);
+      expect(await response.json()).toMatchObject({
+        message: expect.stringContaining("not supported"),
+        protocol: "websocket",
+      });
+      // The whole point: never pretend to forward it.
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    });
+
+    it("records the refusal so the dashboard does not show a healthy 200", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("plain body"));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      await app.request("/proxira/socket", { headers: handshakeHeaders });
+
+      const payload = await (await app.request("/_proxira/api/records?limit=10")).json();
+      expect(payload.items).toHaveLength(1);
+      expect(payload.items[0]).toMatchObject({
+        method: "GET",
+        path: "/socket",
+        responseStatus: 501,
+        responseBody: null,
+      });
+      // The reason must be readable in the UI, not a generic forwarding error.
+      expect(payload.items[0].error).toContain("WebSocket");
+      expect(payload.items[0].error).toContain("never reached the upstream");
+      // The handshake headers stay visible for diagnosis.
+      expect(payload.items[0].requestHeaders).toMatchObject({
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+      });
+    });
+
+    it("refuses any protocol upgrade, not just websocket", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("plain body"));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      const response = await app.request("/proxira/http2", {
+        headers: { connection: "Upgrade, HTTP2-Settings", upgrade: "h2c" },
+      });
+
+      expect(response.status).toBe(501);
+      expect(await response.json()).toMatchObject({ protocol: "h2c" });
+      expect(upstreamFetch).not.toHaveBeenCalled();
+    });
+
+    it("still forwards an Upgrade header when Connection does not ask for it", async () => {
+      const upstreamFetch = vi.fn(async () => new Response("ok", { status: 200 }));
+      const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+      const response = await app.request("/proxira/api/plain", {
+        headers: { upgrade: "websocket" },
+      });
+
+      expect(response.status).toBe(200);
+      expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    });
+  });
 });
