@@ -44,7 +44,11 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 >
 > 服务默认只监听 `127.0.0.1`，局域网/容器外访问需显式指定 `--host 0.0.0.0`。
 >
-> 流式响应（SSE 等）不会为了观测而完整缓冲，否则会拖住请求；面板按采样增量显示已收到的内容。
+> 非流式正文默认完整记录，仅当超过 `PROXY_MAX_BODY_CAPTURE_BYTES`（默认 2MB）时截断为前缀并标记 `truncated`。
+>
+> 流式响应（SSE 等）**默认全量捕获、不按长度截断**：客户端读取走独立的 tee 分支不受影响，面板每秒增量上屏，
+> 流结束后可拿到完整内容；需要重新加上限用 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`。
+> 落盘时仍按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积，内存中始终是完整的。
 
 ## 折叠、局域网共享与窄屏自适应
 
@@ -324,7 +328,9 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 | `PROXY_PREFIX_ENABLED` | 是否启用代理前缀 | 启用 |
 | `PROXY_HOST` | 监听地址 | `127.0.0.1` |
 | `PROXY_UPSTREAM_TIMEOUT_MS` | 上游请求超时（毫秒），超时返回 504 | `30000` |
-| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
+| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条**非流式**正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
+| `PROXY_STREAM_MAX_CAPTURE_BYTES` | 流式响应（SSE / multipart）捕获字节上限，`0` = 不限制 | `0` |
+| `PROXY_STREAM_MAX_CAPTURE_MS` | 流式响应采样时长上限（毫秒），`0` = 不限制 | `0` |
 | `PROXY_PERSIST_DEBOUNCE_MS` | 落盘防抖间隔（毫秒） | `500` |
 | `PROXY_HISTORY_LIMIT` | 内存历史上限 | `1000` |
 | `PROXY_HISTORY_PERSIST_LIMIT` | 落盘历史上限 | `200` |

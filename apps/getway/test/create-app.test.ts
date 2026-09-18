@@ -490,7 +490,7 @@ describe("createApp", () => {
     void response.body?.cancel().catch(() => undefined);
   });
 
-  it("marks sampled streaming bodies as truncated past the capture limit", async () => {
+  it("marks sampled streaming bodies as truncated past the stream capture limit", async () => {
     const encoder = new TextEncoder();
     const bigEvent = `data: ${"x".repeat(64)}\n\n`;
     const stream = new ReadableStream<Uint8Array>({
@@ -510,7 +510,7 @@ describe("createApp", () => {
 
     const { app } = await createTestApp({
       fetchImpl: upstreamFetch,
-      configOverrides: { maxBodyCaptureBytes: 100 },
+      configOverrides: { streamMaxCaptureBytes: 100 },
     });
     const response = await app.request("/proxira/api/events");
     await response.text(); // drain the full client stream
@@ -520,6 +520,45 @@ describe("createApp", () => {
         const records = await app.request("/_proxira/api/records?limit=10");
         const payload = await records.json();
         expect(payload.items[0]?.responseBody?.truncated).toBe(true);
+      },
+      { timeout: 3_000, interval: 50 },
+    );
+  });
+
+  it("captures streaming bodies in full by default, ignoring the non-stream body limit", async () => {
+    const encoder = new TextEncoder();
+    const bigEvent = `data: ${"x".repeat(64)}\n\n`;
+    const total = bigEvent.length * 16;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < 16; i += 1) {
+          controller.enqueue(encoder.encode(bigEvent));
+        }
+        controller.close();
+      },
+    });
+    const upstreamFetch = vi.fn(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }) as typeof fetch;
+
+    // 非流式上限故意设得比流内容小：流式响应不应继承它。
+    const { app } = await createTestApp({
+      fetchImpl: upstreamFetch,
+      configOverrides: { maxBodyCaptureBytes: 100 },
+    });
+    const response = await app.request("/proxira/api/events");
+    await response.text();
+
+    await vi.waitFor(
+      async () => {
+        const records = await app.request("/_proxira/api/records?limit=10");
+        const payload = await records.json();
+        const body = payload.items[0]?.responseBody;
+        expect(body?.truncated).toBe(false);
+        expect(body?.text?.length).toBe(total);
       },
       { timeout: 3_000, interval: 50 },
     );

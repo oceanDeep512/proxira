@@ -391,7 +391,9 @@ npx proxira --token my-secret
 | `PROXY_PREFIX_ENABLED` | 关闭代理请求前缀 | 未设置 |
 | `PROXY_HOST` | 监听地址 | `127.0.0.1` |
 | `PROXY_UPSTREAM_TIMEOUT_MS` | 上游请求超时（毫秒），超时返回 504 | `30000` |
-| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
+| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条**非流式**正文记录上限，超出只记录前缀并标记 truncated | `2097152` |
+| `PROXY_STREAM_MAX_CAPTURE_BYTES` | 流式响应（SSE / multipart）捕获字节上限，`0` = 不限制 | `0` |
+| `PROXY_STREAM_MAX_CAPTURE_MS` | 流式响应采样时长上限（毫秒），`0` = 不限制 | `0` |
 | `PROXY_PERSIST_DEBOUNCE_MS` | 落盘防抖间隔（毫秒） | `500` |
 | `PROXY_HISTORY_LIMIT` | 内存历史记录上限 | `1000` |
 | `PROXY_HISTORY_PERSIST_LIMIT` | 持久化历史记录上限 | `200` |
@@ -445,9 +447,12 @@ pnpm run pack:app     # 构建并生成 tarball 到仓库根目录（本地验�
 **502 和 504 的区别**
 `502` 是连不上上游或上游提前断开；`504` 是上游在 `PROXY_UPSTREAM_TIMEOUT_MS`（或转发地址级超时）内没响应。
 
-**流式响应详情里正文是空的**
-SSE / 流式响应不会为了观测而完整缓冲（否则会拖住请求），面板展示的是采样到的内容；
-超过 `PROXY_MAX_BODY_CAPTURE_BYTES` 的记录会截断并标记 `truncated`。
+**流式响应（SSE）的正文为什么是空的 / 被截断了**
+- 正在进行的流：面板每秒增量上屏，刚发起的瞬间可能还没有内容，稍等即可。
+- 默认**不会因为太长而截断**：流式响应走独立的 tee 分支全量捕获，客户端读取不受影响。
+- 若你显式设置了 `PROXY_STREAM_MAX_CAPTURE_BYTES` / `PROXY_STREAM_MAX_CAPTURE_MS`，超过后会停止捕获并标记 `truncated`。
+- 重启后看到的是落盘版本：落盘会按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）裁剪以控制 `history.json` 体积。
+  想让历史也保留完整正文，把它设为 `0`（注意文件会随之变大）。
 
 **启动信息里没有局域网地址**
 默认只监听 `127.0.0.1`，局域网内其他机器连不上，所以不会展示。需要共享时用 `--host 0.0.0.0`

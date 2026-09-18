@@ -33,6 +33,23 @@ const normalizePort = (raw: string | undefined): number => {
   return parsed;
 };
 
+// 0 表示不限制（流式响应默认走这个：截断的 SSE 基本没有排查价值）。
+// 负数与非法值一律回落到默认值。
+const normalizeUnboundedInteger = (
+  raw: string | undefined,
+  fallback: number,
+): number => {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+};
+
 const normalizeProxyPrefix = (value: string): string | null => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -108,6 +125,16 @@ export const loadRuntimeConfig = (
     env.PROXY_MAX_BODY_CAPTURE_BYTES,
     2 * 1024 * 1024,
   );
+  // 流式响应（SSE / 流式 LLM 返回等）默认全量捕获：截断后既看不到完整内容，
+  // 也无法判断是上游断了还是我们截的。只有显式设置下面的变量才会重新加上限。
+  const streamMaxCaptureBytes = normalizeUnboundedInteger(
+    env.PROXY_STREAM_MAX_CAPTURE_BYTES,
+    0,
+  );
+  const streamMaxCaptureMs = normalizeUnboundedInteger(
+    env.PROXY_STREAM_MAX_CAPTURE_MS,
+    0,
+  );
   const upstreamTimeoutMs = normalizePositiveInteger(
     env.PROXY_UPSTREAM_TIMEOUT_MS,
     30_000,
@@ -137,6 +164,8 @@ export const loadRuntimeConfig = (
     host: env.PROXY_HOST?.trim() || DEFAULT_HOST,
     serverPort: normalizePort(env.PORT),
     maxBodyCaptureBytes,
+    streamMaxCaptureBytes,
+    streamMaxCaptureMs,
     upstreamTimeoutMs,
     persistDebounceMs,
     maxQueryLimit: normalizePositiveInteger(env.PROXY_QUERY_LIMIT_MAX, 500),

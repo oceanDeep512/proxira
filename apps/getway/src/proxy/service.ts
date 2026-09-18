@@ -25,11 +25,6 @@ const isTimeoutError = (error: unknown): boolean => {
   return (error as { name?: string }).name === "TimeoutError";
 };
 
-// Upper bound on how long we keep sampling a streaming response for the
-// history record. The client stream is never throttled by this — only the
-// background capture gives up.
-const STREAM_SAMPLE_TIME_BUDGET_MS = 60_000;
-
 // While a long stream is still running, surface the already-sampled bytes to
 // the dashboard at this interval instead of waiting for the stream to finish.
 const STREAM_SAMPLE_EMIT_INTERVAL_MS = 1_000;
@@ -44,8 +39,9 @@ const mergeChunks = (chunks: Uint8Array[], total: number): Uint8Array => {
   return merged;
 };
 
-// Read a tee'd capture branch without blocking the client branch: stop at the
-// byte limit or time budget, then cancel so the tee stops buffering for us.
+// Read a tee'd capture branch without blocking the client branch.
+// `maxCaptureBytes` / `timeBudgetMs` 为 0 时表示不设上限——流式响应默认就是
+// 不限制，否则一段长的 SSE / LLM 流会被我们截掉，排查时无从下手。
 // `onSample` receives the accumulated bytes periodically while sampling, so
 // the dashboard can preview a stream that is still in flight.
 const sampleStreamBody = async (
@@ -58,7 +54,8 @@ const sampleStreamBody = async (
   const chunks: Uint8Array[] = [];
   let total = 0;
   let truncated = false;
-  const deadline = Date.now() + timeBudgetMs;
+  const deadline =
+    timeBudgetMs > 0 ? Date.now() + timeBudgetMs : Number.POSITIVE_INFINITY;
   let lastEmitAt = Date.now();
   let hasEmitted = false;
 
@@ -85,7 +82,7 @@ const sampleStreamBody = async (
       if (value) {
         chunks.push(value);
         total += value.byteLength;
-        if (total >= maxCaptureBytes) {
+        if (maxCaptureBytes > 0 && total >= maxCaptureBytes) {
           truncated = true;
           await reader.cancel("sample byte limit reached").catch(() => undefined);
           break;
@@ -759,30 +756,28 @@ export class ProxyService {
     // Partial previews: patch the record while the stream is still running so
     // users can watch an SSE response grow in the dashboard instead of staring
     // at "streaming body not captured" for minutes.
+    // 上限走流式专用配置（默认 0 = 不限制）。不能沿用非流式的 2MB 上限，
+    // 否则增量预览和最终结果都会在半路被悄悄截断。
+    const captureLimit =
+      this.deps.config.streamMaxCaptureBytes > 0
+        ? this.deps.config.streamMaxCaptureBytes
+        : Number.MAX_SAFE_INTEGER;
     const emitPartial = (bytes: Uint8Array): void => {
-      const partial = collectBody(
-        bytes,
-        contentType,
-        this.deps.config.maxBodyCaptureBytes,
-      );
+      const partial = collectBody(bytes, contentType, captureLimit);
       this.runtime.updateProxyRecordBody(groupId, recordId, partial);
     };
 
     try {
       const sampled = await sampleStreamBody(
         stream,
-        this.deps.config.maxBodyCaptureBytes,
-        STREAM_SAMPLE_TIME_BUDGET_MS,
+        this.deps.config.streamMaxCaptureBytes,
+        this.deps.config.streamMaxCaptureMs,
         emitPartial,
       );
       if (!sampled) {
         return;
       }
-      const collected = collectBody(
-        sampled.bytes,
-        contentType,
-        this.deps.config.maxBodyCaptureBytes,
-      );
+      const collected = collectBody(sampled.bytes, contentType, captureLimit);
       const responseBody: ProxyPayloadBody = sampled.truncated
         ? { ...collected, truncated: true }
         : collected;

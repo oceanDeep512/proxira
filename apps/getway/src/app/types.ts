@@ -17,6 +17,13 @@ export type RuntimeConfig = {
   host: string;
   serverPort: number;
   maxBodyCaptureBytes: number;
+  /**
+   * 流式响应（SSE / multipart）的捕获上限，0 = 不限制。
+   * 与非流式正文分开：SSE 被截断等于整段调试信息丢失，默认全量保留。
+   */
+  streamMaxCaptureBytes: number;
+  /** 流式响应采样时长上限（毫秒），0 = 不限制。 */
+  streamMaxCaptureMs: number;
   upstreamTimeoutMs: number;
   persistDebounceMs: number;
   maxQueryLimit: number;
