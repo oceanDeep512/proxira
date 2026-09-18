@@ -278,11 +278,10 @@
 
 /* ---- 组件层：只放「重复出现且结构固定」的块，其余在 JSX 里用工具类 ---- */
 @layer components {
-  .px-card {
-    border: 1px solid var(--px-line);
-    border-radius: var(--radius-lg);
+  /* 面板：桌面软件风格 —— 没有卡片边框/圆角/阴影，靠 1px 分隔线分区，
+     省下来的空间全部让给内容。区域之间的线由各自按需加 border-b / border-r。 */
+  .px-panel {
     background: var(--px-surface);
-    box-shadow: var(--px-shadow-flat), var(--px-shadow-soft);
   }
 
   .px-panel-head {

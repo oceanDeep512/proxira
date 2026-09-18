@@ -28,7 +28,9 @@ export const TargetHub = ({
   return (
     <section
       className={cn(
-        "px-card flex min-w-[260px] flex-1 flex-col gap-2.5 px-3 py-3",
+        "px-panel flex min-w-[260px] flex-1 flex-col gap-2.5 border-b border-line px-3 py-2.5",
+        // 窄屏下它会和顶栏并到同一行（contents 拆掉了外层盒子），需要一条竖线隔开。
+        "max-panel:border-l max-panel:border-line",
         "panel:w-full panel:grow-0 panel:shrink-0 panel:basis-auto",
       )}
     >

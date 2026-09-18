@@ -1,4 +1,4 @@
-import { Moon, RefreshCw, RotateCcw, Sun } from "lucide-react";
+import { Moon, RotateCcw, Sun } from "lucide-react";
 import { useProxiraStore } from "../../store/proxira";
 import { useUiStore } from "../../store/ui";
 import { Button } from "../ui/Button";
@@ -22,7 +22,6 @@ export const TopBar = ({
 }) => {
   const connectionState = useProxiraStore((state) => state.connectionState);
   const connectSse = useProxiraStore((state) => state.connectSse);
-  const recordsTotal = useProxiraStore((state) => state.recordsTotal);
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
 
@@ -31,8 +30,8 @@ export const TopBar = ({
   return (
     <header
       className={cn(
-        "px-card flex min-w-[260px] flex-1 flex-wrap items-center justify-between gap-3",
-        "px-4 py-3",
+        "px-panel flex min-w-[260px] flex-1 flex-wrap items-center justify-between gap-3",
+        "border-b border-line px-4 py-2.5",
         "panel:w-full panel:grow-0 panel:shrink-0 panel:basis-auto",
       )}
     >
@@ -51,7 +50,17 @@ export const TopBar = ({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Pill tone={meta.tone} className="gap-1.5 py-1">
+        {/* 状态本身就是重连入口：点一下重新建立 SSE，省掉一个专用按钮 */}
+        <Pill
+          tone={meta.tone}
+          className="gap-1.5 py-1"
+          onClick={connectSse}
+          disabled={connectionState === "connecting"}
+          title={
+            connectionState === "connecting" ? "正在重连…" : "重新建立连接（点击手动重连）"
+          }
+          label="重新建立连接"
+        >
           <span className="relative flex size-1.5">
             <span
               className={cn(
@@ -64,17 +73,7 @@ export const TopBar = ({
           {meta.label}
         </Pill>
 
-        <Pill tone="neutral" className="py-1">
-          {recordsTotal} 条
-        </Pill>
-
         <div className="flex items-center gap-1.5">
-          <Tooltip label="重新建立 SSE 连接">
-            <IconButton label="重新连接" onClick={connectSse}>
-              <RefreshCw />
-            </IconButton>
-          </Tooltip>
-
           <Tooltip label={theme === "dark" ? "切换到浅色" : "切换到深色"}>
             <IconButton
               label={theme === "dark" ? "切换到浅色" : "切换到深色"}

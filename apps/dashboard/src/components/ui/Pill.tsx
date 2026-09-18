@@ -55,23 +55,51 @@ export const Pill = ({
   children,
   mono = true,
   title,
+  /** 传了 onClick 就渲染成按钮（如顶栏「服务在线」= 点击重连）。 */
+  onClick,
+  label,
+  disabled,
 }: {
   tone?: Tone;
   className?: string;
   children: React.ReactNode;
   mono?: boolean;
   title?: string;
-}) => (
-  <span
-    title={title}
-    className={cn(
-      "inline-flex max-w-full items-center gap-1 truncate rounded-full border px-2 py-px",
-      "text-[11px] font-semibold tracking-wide",
-      mono && "font-mono",
-      toneClasses[tone],
-      className,
-    )}
-  >
-    {children}
-  </span>
-);
+  onClick?: () => void;
+  label?: string;
+  disabled?: boolean;
+}) => {
+  const classes = cn(
+    "inline-flex max-w-full items-center gap-1 truncate rounded-full border px-2 py-px",
+    "text-[11px] font-semibold tracking-wide",
+    mono && "font-mono",
+    toneClasses[tone],
+    className,
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        title={title}
+        aria-label={label ?? title}
+        className={cn(
+          classes,
+          "cursor-pointer transition-[filter,opacity] duration-150",
+          "hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60",
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        )}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  return (
+    <span title={title} className={classes}>
+      {children}
+    </span>
+  );
+};

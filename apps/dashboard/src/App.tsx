@@ -138,11 +138,14 @@ const App = () => {
     if (result) setReplayResult(result);
   };
 
+  // 桌面软件风格：整块 surface 铺满窗口，区域之间只用 1px 分隔线，
+  // 不再靠 gap 和卡片留白分区，省下的空间都给内容。
+  // 注意：注释必须留在 return 外，写进 JSX children 会被当成文本渲染出去。
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={200}>
       <div
         className={[
-          "relative z-[1] flex min-h-dvh flex-wrap content-start gap-3 p-3",
+          "relative z-[1] flex min-h-dvh flex-wrap content-start bg-surface",
           "panel:h-dvh panel:min-h-0 panel:flex-col panel:flex-nowrap panel:overflow-hidden",
         ].join(" ")}
       >
@@ -150,8 +153,8 @@ const App = () => {
 
         {/* 窄屏：workspace / left-column 两层盒子被 contents 拆掉，
             让 转发地址 与 顶栏 直接成为同一行的 flex 项（沿用原面板的断点行为）。 */}
-        <div className="contents panel:flex panel:min-h-0 panel:flex-1 panel:flex-nowrap panel:gap-3">
-          <div className="contents panel:flex panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:flex-col panel:gap-3 panel:min-h-0">
+        <div className="contents panel:flex panel:min-h-0 panel:flex-1 panel:flex-nowrap">
+          <div className="contents panel:flex panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:flex-col panel:border-r panel:border-line panel:min-h-0">
             <TargetHub
               onCreate={() => setTargetModal({ mode: "create" })}
               onEdit={() => setTargetModal({ mode: "edit" })}

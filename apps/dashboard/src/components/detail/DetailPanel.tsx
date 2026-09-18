@@ -91,7 +91,7 @@ export const DetailPanel = ({
     return (
       <section
         className={cn(
-          "px-card flex min-w-0 basis-full flex-col items-center justify-center overflow-hidden",
+          "px-panel flex min-w-0 basis-full flex-col items-center justify-center overflow-hidden",
           "panel:min-h-0 panel:flex-1 panel:basis-0",
         )}
       >
@@ -114,7 +114,7 @@ export const DetailPanel = ({
   return (
     <section
       className={cn(
-        "px-card flex min-w-0 basis-full flex-col overflow-hidden",
+        "px-panel flex min-w-0 basis-full flex-col overflow-hidden",
         "panel:min-h-0 panel:flex-1 panel:basis-0",
       )}
     >
