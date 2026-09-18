@@ -7,6 +7,7 @@ import {
 } from "./store/proxira";
 import { useUiStore } from "./store/ui";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { cn } from "./lib/cn";
 import { TopBar } from "./components/layout/TopBar";
 import { TargetHub } from "./components/layout/TargetHub";
 import { RecordList } from "./components/records/RecordList";
@@ -138,23 +139,26 @@ const App = () => {
     if (result) setReplayResult(result);
   };
 
-  // 桌面软件风格：整块 surface 铺满窗口，区域之间只用 1px 分隔线，
-  // 不再靠 gap 和卡片留白分区，省下的空间都给内容。
+  // 桌面软件骨架：整块锁在 100dvh 内，页面本身永不滚动，
+  // 只有列表和正文各自内部滚。窄屏也是同一套（纵向堆叠 + 内部分区滚动），
+  // 这样任何窗口尺寸下布局都成立。
   // 注意：注释必须留在 return 外，写进 JSX children 会被当成文本渲染出去。
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={200}>
-      <div
-        className={[
-          "relative z-[1] flex min-h-dvh flex-wrap content-start bg-surface",
-          "panel:h-dvh panel:min-h-0 panel:flex-col panel:flex-nowrap panel:overflow-hidden",
-        ].join(" ")}
-      >
+      <div className="relative z-[1] flex h-dvh flex-col flex-nowrap overflow-hidden bg-surface">
         <TopBar onReset={() => setResetModalOpen(true)} resetting={resettingAll} />
 
-        {/* 窄屏：workspace / left-column 两层盒子被 contents 拆掉，
-            让 转发地址 与 顶栏 直接成为同一行的 flex 项（沿用原面板的断点行为）。 */}
-        <div className="contents panel:flex panel:min-h-0 panel:flex-1 panel:flex-nowrap">
-          <div className="contents panel:flex panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:flex-col panel:border-r panel:border-line panel:min-h-0">
+        {/* 窄屏纵向堆叠、宽屏左右分栏；这一层负责分配除顶栏外的全部高度。 */}
+        <div className="flex min-h-0 flex-1 flex-col panel:flex-row panel:flex-nowrap">
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-col",
+              // 窄屏：左列最多占半个视口，剩下的全给详情
+              "max-panel:max-h-[48dvh] max-panel:shrink-0",
+              // 宽屏：定宽侧栏 + 右侧分隔线
+              "panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:border-r panel:border-line",
+            )}
+          >
             <TargetHub
               onCreate={() => setTargetModal({ mode: "create" })}
               onEdit={() => setTargetModal({ mode: "edit" })}

@@ -159,6 +159,9 @@
   body,
   #app {
     height: 100%;
+    /* 桌面软件式：页面本身永不滚动，滚动只发生在列表 / 正文内部。
+       所有面板都被锁在 100dvh 内，各自的滚动容器自己负责 overflow。 */
+    overflow: hidden;
   }
 
   body {

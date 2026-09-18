@@ -30,9 +30,10 @@ export const TopBar = ({
   return (
     <header
       className={cn(
-        "px-panel flex min-w-[260px] flex-1 flex-wrap items-center justify-between gap-3",
+        // 顶栏永远不参与伸缩：外层是纵向 flex 列，带 flex-1 会被垂直拉满。
+        "px-panel flex min-w-0 shrink-0 grow-0 basis-auto flex-wrap items-center justify-between gap-3",
         "border-b border-line px-4 py-2.5",
-        "panel:w-full panel:grow-0 panel:shrink-0 panel:basis-auto",
+        "panel:w-full",
       )}
     >
       <div className="flex min-w-0 items-center gap-3">

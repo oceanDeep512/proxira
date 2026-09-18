@@ -165,9 +165,8 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
   return (
     <section
       className={cn(
-        "px-panel flex min-w-0 basis-full flex-col overflow-hidden",
+        "px-panel flex min-h-0 min-w-0 w-full flex-1 basis-auto flex-col overflow-hidden",
         "max-panel:border-b max-panel:border-line",
-        "panel:min-h-0 panel:flex-1 panel:basis-auto",
       )}
     >
       <div className="px-panel-head">

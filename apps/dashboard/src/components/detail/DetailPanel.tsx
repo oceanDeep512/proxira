@@ -91,8 +91,7 @@ export const DetailPanel = ({
     return (
       <section
         className={cn(
-          "px-panel flex min-w-0 basis-full flex-col items-center justify-center overflow-hidden",
-          "panel:min-h-0 panel:flex-1 panel:basis-0",
+          "px-panel flex min-h-0 min-w-0 flex-1 basis-0 flex-col items-center justify-center overflow-hidden",
         )}
       >
         <EmptyState
@@ -114,8 +113,7 @@ export const DetailPanel = ({
   return (
     <section
       className={cn(
-        "px-panel flex min-w-0 basis-full flex-col overflow-hidden",
-        "panel:min-h-0 panel:flex-1 panel:basis-0",
+        "px-panel flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden",
       )}
     >
       <header className="flex flex-col gap-2.5 border-b border-line px-4 py-3">

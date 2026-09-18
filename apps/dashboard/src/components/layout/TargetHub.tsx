@@ -28,10 +28,9 @@ export const TargetHub = ({
   return (
     <section
       className={cn(
-        "px-panel flex min-w-[260px] flex-1 flex-col gap-2.5 border-b border-line px-3 py-2.5",
-        // 窄屏下它会和顶栏并到同一行（contents 拆掉了外层盒子），需要一条竖线隔开。
-        "max-panel:border-l max-panel:border-line",
-        "panel:w-full panel:grow-0 panel:shrink-0 panel:basis-auto",
+        // 同上：高度固定、不伸缩，否则纵向布局里会被拉伸。
+        "px-panel flex min-w-0 shrink-0 grow-0 basis-auto flex-col gap-2.5 border-b border-line px-3 py-2.5",
+        "panel:w-full",
       )}
     >
       <div className="flex items-center justify-between gap-2">
