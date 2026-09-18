@@ -4,6 +4,7 @@ import { useUiStore } from "../../store/ui";
 import { IconButton } from "../ui/IconButton";
 import { Select } from "../ui/Select";
 import { RecordPicker } from "../records/RecordPicker";
+import { TargetActions } from "./TargetActions";
 import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../lib/cn";
 
@@ -34,8 +35,10 @@ export const TargetHub = ({
         "panel:w-full",
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="px-title-eyebrow">转发地址</span>
+      {/* 标题字号与「历史请求」等面板标题一致（font-display 15px semibold）。
+          窄屏整行隐藏：标题、超时都由浮层/下拉自解释，把高度让给内容。 */}
+      <div className="flex items-center justify-between gap-2 max-panel:hidden">
+        <h2 className="font-display text-[15px] font-semibold">转发地址</h2>
         {activeTarget?.upstreamTimeoutMs ? (
           <span className="font-mono text-[11px] text-fg-dim">
             超时 {activeTarget.upstreamTimeoutMs} ms
@@ -43,8 +46,8 @@ export const TargetHub = ({
         ) : null}
       </div>
 
-      {/* 窄屏把「历史请求」收进这一行：下拉占剩余宽度，选择器按钮贴右边，
-          省掉下面那一整块列表高度。宽屏下按钮隐藏，列表仍在左栏常驻。 */}
+      {/* 窄屏这一行是全部内容：下拉吃掉剩余宽度，历史请求与功能菜单贴右。
+          宽屏只有下拉，历史请求按钮与功能菜单都隐藏（分别回到左栏列表和下方按钮排）。 */}
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <Select
@@ -59,9 +62,17 @@ export const TargetHub = ({
           />
         </div>
         <RecordPicker className="max-panel:inline-flex panel:hidden" />
+        <TargetActions
+          className="max-panel:inline-flex panel:hidden"
+          onCreate={onCreate}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRules={onRules}
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* 宽屏平铺按钮排；窄屏改由上面的折叠浮层承载，这里整行隐藏。 */}
+      <div className="flex flex-wrap items-center gap-1.5 max-panel:hidden">
         <Tooltip label="新增转发地址">
           <IconButton label="新增转发地址" onClick={onCreate} tone="accent">
             <Plus />

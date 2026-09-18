@@ -22,16 +22,18 @@ export const RecordPicker = ({ className }: { className?: string }) => {
 
   return (
     <>
+      {/* 只给最小宽度：宽度由「历史请求 + 条数」自然撑开，空间紧张时才压缩并截断，
+          不写死成固定值，也不再和下拉抢固定份额。 */}
       <Button
         size="sm"
         variant="secondary"
-        className={cn("min-w-0 shrink-0", className)}
+        className={cn("min-w-[96px]", className)}
         onClick={() => setOpen(true)}
         aria-label="打开历史请求列表"
         title={selected ? `当前：${selected.method} ${selected.path}` : "选择一条历史请求"}
       >
         <History className="size-3.5 shrink-0" />
-        <span className="truncate">
+        <span className="min-w-0 truncate">
           历史请求
           <span className="ml-1 font-mono text-fg-dim">{records.length}</span>
         </span>
