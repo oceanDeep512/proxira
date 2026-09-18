@@ -16,9 +16,12 @@ const connectionMeta = {
 export const TopBar = ({
   onReset,
   resetting,
+  className,
 }: {
   onReset: () => void;
   resetting: boolean;
+  /** 窄屏专注模式下由 App 传 max-panel:hidden 整条隐藏。 */
+  className?: string;
 }) => {
   const connectionState = useProxiraStore((state) => state.connectionState);
   const connectSse = useProxiraStore((state) => state.connectSse);
@@ -34,6 +37,7 @@ export const TopBar = ({
         "px-panel flex min-w-0 shrink-0 grow-0 basis-auto flex-wrap items-center justify-between gap-3",
         "border-b border-line px-4 py-2.5",
         "panel:w-full",
+        className,
       )}
     >
       <div className="flex min-w-0 items-center gap-3">

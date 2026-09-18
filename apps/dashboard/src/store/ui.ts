@@ -50,6 +50,10 @@ type UiState = {
 
   listPanelOpen: boolean;
   setListPanelOpen: (open: boolean) => void;
+
+  /** 窄屏专注模式：隐藏顶栏与转发地址区，详情整屏显示。 */
+  detailFocused: boolean;
+  setDetailFocused: (focused: boolean) => void;
 };
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -84,4 +88,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   listPanelOpen: false,
   setListPanelOpen: (open) => set({ listPanelOpen: open }),
+
+  detailFocused: false,
+  setDetailFocused: (focused) => set({ detailFocused: focused }),
 }));

@@ -60,6 +60,8 @@ const App = () => {
 
   const setListPanelOpen = useUiStore((state) => state.setListPanelOpen);
   const showSensitive = useUiStore((state) => state.showSensitive);
+  const detailFocused = useUiStore((state) => state.detailFocused);
+  const setDetailFocused = useUiStore((state) => state.setDetailFocused);
 
   const [targetModal, setTargetModal] = useState<{ mode: "create" | "edit" } | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -78,10 +80,28 @@ const App = () => {
     };
   }, [bootstrap, disconnectSse]);
 
-  // 窄屏进入时把历史列表收起，保证详情第一眼可见。
+  // 窄屏进入时把历史列表收起，保证详情第一眼可见；
+  // 宽屏是双栏，专注模式没有意义，顺手复位避免状态残留。
   useEffect(() => {
-    if (!isWide) setListPanelOpen(false);
-  }, [isWide, setListPanelOpen]);
+    if (!isWide) {
+      setListPanelOpen(false);
+      return;
+    }
+    setDetailFocused(false);
+  }, [isWide, setListPanelOpen, setDetailFocused]);
+
+  // Esc 退出专注模式。焦点在输入框里时让给搜索框自己的清空逻辑。
+  useEffect(() => {
+    if (!detailFocused) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      setDetailFocused(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailFocused, setDetailFocused]);
 
   const selectedRecord = useMemo(
     () => records.find((record) => record.id === selectedRecordId) ?? records[0] ?? null,
@@ -146,7 +166,13 @@ const App = () => {
   return (
     <TooltipProvider delayDuration={300} skipDelayDuration={200}>
       <div className="relative z-[1] flex h-dvh flex-col flex-nowrap overflow-hidden bg-surface">
-        <TopBar onReset={() => setResetModalOpen(true)} resetting={resettingAll} />
+        {/* 专注模式只在窄屏生效：用 max-panel 限定，拉宽窗口会自动恢复，
+            不会出现「宽屏下顶栏不见了」的死角。 */}
+        <TopBar
+          onReset={() => setResetModalOpen(true)}
+          resetting={resettingAll}
+          className={cn(detailFocused && "max-panel:hidden")}
+        />
 
         {/* 窄屏纵向堆叠、宽屏左右分栏；这一层负责分配除顶栏外的全部高度。 */}
         <div className="flex min-h-0 flex-1 flex-col panel:flex-row panel:flex-nowrap">
@@ -156,6 +182,8 @@ const App = () => {
               // 窄屏：历史请求改由转发地址那一行里的选择器唤起对话框，
               // 左栏只剩转发地址这一块，高度自适应，剩下的全给详情。
               "max-panel:shrink-0",
+              // 专注模式下整列让位给详情（窄屏左列本来就只剩转发地址区）。
+              detailFocused && "max-panel:hidden",
               // 宽屏：定宽侧栏 + 右侧分隔线
               "panel:w-[clamp(300px,24vw,384px)] panel:shrink-0 panel:border-r panel:border-line",
             )}

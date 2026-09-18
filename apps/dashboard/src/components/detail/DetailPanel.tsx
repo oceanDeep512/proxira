@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Copy, Play } from "lucide-react";
+import { Copy, Maximize2, Minimize2, Play } from "lucide-react";
 import type { ProxyTrafficRecord } from "@proxira/core";
 import { parseBody, redactBodyView, resolveContentType } from "../../lib/body";
 import { buildCurlCommand, formatDuration, formatTime, resolveStatusTone } from "../../lib/format";
@@ -9,6 +9,7 @@ import { useUiStore, type DetailTab } from "../../store/ui";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { Pill, methodTone } from "../ui/Pill";
+import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../lib/cn";
 import { BodyViewer } from "./BodyViewer";
 import { HeadersView } from "./HeadersView";
@@ -56,6 +57,8 @@ export const DetailPanel = ({
   const activeTab = useUiStore((state) => state.activeTab);
   const setActiveTab = useUiStore((state) => state.setActiveTab);
   const showSensitive = useUiStore((state) => state.showSensitive);
+  const detailFocused = useUiStore((state) => state.detailFocused);
+  const setDetailFocused = useUiStore((state) => state.setDetailFocused);
 
   const views = useMemo(() => {
     if (!record) return null;
@@ -139,6 +142,24 @@ export const DetailPanel = ({
               <Copy className="size-3.5" />
               cURL
             </Button>
+            {/* 窄屏专注模式：隐藏顶栏与转发地址区，详情整屏显示。
+                只在堆叠布局（<960）出现，宽屏本来就是双栏，不需要。 */}
+            <Tooltip label={detailFocused ? "退出全屏（Esc）" : "全屏查看当前请求"}>
+              <Button
+                size="sm"
+                variant={detailFocused ? "secondary" : "ghost"}
+                className="panel:hidden"
+                aria-pressed={detailFocused}
+                onClick={() => setDetailFocused(!detailFocused)}
+              >
+                {detailFocused ? (
+                  <Minimize2 className="size-3.5" />
+                ) : (
+                  <Maximize2 className="size-3.5" />
+                )}
+                {detailFocused ? "退出" : "展开"}
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
