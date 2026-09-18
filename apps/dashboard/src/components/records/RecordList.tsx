@@ -80,6 +80,8 @@ const RecordRow = ({
           className={cn(
             "size-6 shrink-0 [&_svg]:size-3",
             "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
+            // 触摸设备没有 hover，删除按钮必须常显，否则永远点不到。
+            "pointer-coarse:opacity-100",
           )}
           tone="danger"
           disabled={deleting}

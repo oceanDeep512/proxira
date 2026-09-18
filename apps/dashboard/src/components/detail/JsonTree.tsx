@@ -165,6 +165,7 @@ const JsonNode = ({
 }) => {
   const { collapsed, toggle, matchPaths, query } = useContext(TreeContext);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [fullText, setFullText] = useState(false);
 
   const container = isContainer(value);
   // 搜索命中的分支强制展开，否则命中项会被折叠状态藏起来。
@@ -176,22 +177,41 @@ const JsonNode = ({
     });
   }, [value]);
 
+  // key 必须整体 shrink-0：全局 `* { min-width: 0 }` 会让 flex 项缩到 0，
+  // 长 value 一挤，key 文字就会叠到 value 上。
   const keyPart = nodeKey === undefined ? null : (
-    <>
+    <span className="shrink-0 whitespace-nowrap">
       <span className={cn("json-key", isSensitiveKey(nodeKey) && "json-key-sensitive")}>
         {highlightMatches(`"${nodeKey}"`, query)}
       </span>
       <span className="json-punct">:&nbsp;</span>
-    </>
+    </span>
   );
 
   if (!container) {
+    // base64 / 长 token 之类的值会把树撑成一堵墙：先截断，点击再展开。
+    // 搜索时不做截断，否则命中点可能被切掉。
+    const clampLong = !query && !fullText && typeof value === "string" && value.length > 240;
+    const shownText = clampLong
+      ? `"${(value as string).slice(0, 240)}…"`
+      : primitiveText(value);
+
     return (
       <Row depth={depth} path={path} onCopy={copyNode}>
         <span className="w-3.5 shrink-0" />
         {keyPart}
-        <span className={cn("break-all", valueClass(value))}>
-          {highlightMatches(primitiveText(value), query)}
+        {/* 不能 flex-1：会把行尾逗号推到最右边，值多长就占多宽 */}
+        <span className={cn("min-w-0 break-all", valueClass(value))}>
+          {highlightMatches(shownText, query)}
+          {clampLong ? (
+            <button
+              type="button"
+              onClick={() => setFullText(true)}
+              className="ml-1.5 rounded-sm px-1 text-[11px] text-accent hover:bg-accent-soft"
+            >
+              展开全部 {(value as string).length} 字符
+            </button>
+          ) : null}
         </span>
         {isLast ? null : <span className="json-punct">,</span>}
       </Row>

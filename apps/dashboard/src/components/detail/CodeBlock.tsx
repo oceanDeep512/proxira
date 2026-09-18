@@ -4,7 +4,7 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import markdown from "highlight.js/lib/languages/markdown";
 import http from "highlight.js/lib/languages/http";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { WrapText } from "lucide-react";
 import { highlightMatches } from "./JsonTree";
 import { cn } from "../../lib/cn";
@@ -44,12 +44,14 @@ export const CodeBlock = ({
   query = "",
   className,
   maxHeight,
+  toolbarExtra,
 }: {
   code: string;
   language?: CodeLanguage;
   query?: string;
   className?: string;
   maxHeight?: number;
+  toolbarExtra?: ReactNode;
 }) => {
   const [wrap, setWrap] = useState(true);
 
@@ -70,6 +72,7 @@ export const CodeBlock = ({
   return (
     <div className={cn("relative min-w-0", className)}>
       <div className="flex items-center justify-end gap-1 pb-1.5">
+        {toolbarExtra}
         <button
           type="button"
           onClick={() => setWrap((value) => !value)}

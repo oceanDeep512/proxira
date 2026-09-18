@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Copy, Download, Search, UnfoldVertical } from "lucide-react";
+import { AlertTriangle, Braces, Copy, Download, Search, UnfoldVertical } from "lucide-react";
 import type { BodyView } from "../../lib/body";
 import {
   bodyModeLabel,
@@ -9,9 +9,10 @@ import {
   bodyUsesSseEvents,
   bodyViewToCopyText,
 } from "../../lib/body";
-import { formatBytes } from "../../lib/format";
+import { formatBytes, toPrettyJson } from "../../lib/format";
 import { useCopy } from "../../hooks/useCopy";
 import { Button } from "../ui/Button";
+import { EmptyState } from "../ui/EmptyState";
 import { IconButton } from "../ui/IconButton";
 import { Pill } from "../ui/Pill";
 import { Segmented } from "../ui/Segmented";
@@ -44,12 +45,14 @@ export const BodyViewer = ({
   // mode / query 都属于「这条记录」的视图状态：换记录必须重置，
   // 否则上一条选的「原始」会串到下一条的 JSON 上。
   const [mode, setMode] = useState<BodyMode | null>(null);
+  const [minified, setMinified] = useState(false);
   const [viewKey, setViewKey] = useState(view);
   if (viewKey !== view) {
     setViewKey(view);
     setMode(null);
     setQuery("");
     setExpanded(false);
+    setMinified(false);
   }
 
   const options = useMemo(() => {
@@ -68,8 +71,47 @@ export const BodyViewer = ({
       ? mode
       : (options[0]?.value ?? "raw");
 
+  // JSON 解析成功后 parseBody 会把 text 留空（数据只存在 jsonData 里），
+  // 所以「原始」视图必须回落到序列化的 JSON，否则会渲染出一个空框。
+  const jsonFallback = !view.text && view.jsonData !== null && view.jsonData !== undefined;
+  const rawText = jsonFallback
+    ? minified
+      ? JSON.stringify(view.jsonData)
+      : toPrettyJson(view.jsonData)
+    : view.text;
+
   const tooLarge = sizeBytes > LARGE_BYTES && !expanded;
-  const lineCount = useMemo(() => view.text.split("\n").length, [view.text]);
+  const lineCount = useMemo(() => rawText.split("\n").length, [rawText]);
+
+  // 单独提出来，避免深层三元嵌套里数错括号（可读性也比内联好）。
+  const rawNode = rawText ? (
+    <CodeBlock
+      code={rawText}
+      language={languageForMode(view.mode)}
+      query={query}
+      maxHeight={560}
+      toolbarExtra={
+        jsonFallback ? (
+          <button
+            type="button"
+            onClick={() => setMinified((value) => !value)}
+            className={cn(
+              "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
+              "text-fg-dim transition-colors hover:bg-surface-3 hover:text-fg",
+            )}
+          >
+            <Braces className="size-3" />
+            {minified ? "格式化" : "压缩"}
+          </button>
+        ) : null
+      }
+    />
+  ) : (
+    <EmptyState
+      title="没有正文内容"
+      hint={view.note || "该方向没有记录到正文（可能是空响应或流式响应未捕获）。"}
+    />
+  );
 
   const download = (): void => {
     const blob = new Blob([bodyViewToCopyText(view)], {
@@ -95,7 +137,7 @@ export const BodyViewer = ({
           </Pill>
         ) : null}
         <span className="font-mono text-[11px] text-fg-dim">{formatBytes(sizeBytes)}</span>
-        {view.text ? (
+        {rawText ? (
           <span className="font-mono text-[11px] text-fg-dim">{lineCount} 行</span>
         ) : null}
 
@@ -181,14 +223,7 @@ export const BodyViewer = ({
           className="rich-preview overflow-auto rounded-md border border-line bg-surface-2 p-3"
           dangerouslySetInnerHTML={{ __html: view.previewHtml }}
         />
-      ) : (
-        <CodeBlock
-          code={view.text}
-          language={languageForMode(view.mode)}
-          query={query}
-          maxHeight={560}
-        />
-      )}
+      ) : activeMode === "raw" ? rawNode : null}
 
       {view.note && view.mode !== "empty" && !view.truncated ? (
         <p className="m-0 text-[11px] leading-snug text-fg-dim">{view.note}</p>
