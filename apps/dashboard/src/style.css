@@ -28,7 +28,11 @@
 
   --scroll-track: color-mix(in srgb, var(--surface-muted) 72%, transparent);
   --scroll-thumb: color-mix(in srgb, var(--accent) 58%, var(--line-strong));
-  --scroll-thumb-hover: color-mix(in srgb, var(--accent-strong) 82%, var(--line-strong));
+  --scroll-thumb-hover: color-mix(
+    in srgb,
+    var(--accent-strong) 82%,
+    var(--line-strong)
+  );
 
   --radius-lg: 16px;
   --radius-md: 12px;
@@ -52,7 +56,8 @@
   --shadow-flat: 0 1px 2px rgba(17, 45, 74, 0.08);
   --shadow-soft: 0 20px 44px -16px rgba(29, 57, 91, 0.16);
 
-  --font-body: "Sora", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-body:
+    "Sora", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
   --font-display: "Barlow Condensed", "Noto Sans SC", sans-serif;
   --font-mono: "IBM Plex Mono", "Iosevka", "JetBrains Mono", monospace;
 }
@@ -109,7 +114,11 @@ body {
   font-family: var(--font-body);
   color: var(--text);
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 46%),
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 46%
+    ),
     linear-gradient(160deg, var(--bg), var(--bg-grad));
 }
 
@@ -119,8 +128,16 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--line) 30%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--line) 26%, transparent) 1px, transparent 1px);
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--line) 30%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--line) 26%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 32px 32px;
   mask-image: radial-gradient(circle at 30% 10%, black 22%, transparent 78%);
   opacity: 0.42;
@@ -330,7 +347,11 @@ body::before {
   cursor: pointer;
   position: relative;
   z-index: 1;
-  transition: border-color 130ms ease, color 130ms ease, background-color 130ms ease, transform 130ms ease;
+  transition:
+    border-color 130ms ease,
+    color 130ms ease,
+    background-color 130ms ease,
+    transform 130ms ease;
 }
 
 .round-icon-button svg {
@@ -381,7 +402,13 @@ body::before {
   line-height: 1.2;
   white-space: nowrap;
   box-shadow: var(--shadow-flat), var(--shadow-soft);
-  transition: opacity 130ms ease, transform 130ms ease;
+  /* 隐藏态必须真正不生成盒子：仅 opacity:0 时伪元素仍参与布局，
+     会在窄屏把 body 撑出横向滚动条（480px 下实测溢出 43px） */
+  display: none;
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease,
+    display 130ms allow-discrete;
 }
 
 .round-icon-button[data-tooltip]::after {
@@ -396,15 +423,35 @@ body::before {
   border-right: 5px solid transparent;
   border-top: 6px solid color-mix(in srgb, var(--surface) 96%, transparent);
   z-index: 59;
-  transition: opacity 130ms ease, transform 130ms ease;
+  display: none;
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease,
+    display 130ms allow-discrete;
 }
 
 .round-icon-button[data-tooltip]:hover::before,
 .round-icon-button[data-tooltip]:hover::after,
 .round-icon-button[data-tooltip]:focus-visible::before,
 .round-icon-button[data-tooltip]:focus-visible::after {
+  display: block;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+@starting-style {
+  .round-icon-button[data-tooltip]:hover::before,
+  .round-icon-button[data-tooltip]:hover::after,
+  .round-icon-button[data-tooltip]:focus-visible::before,
+  .round-icon-button[data-tooltip]:focus-visible::after {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+/* 按钮文案永远单行：窄屏宁可挤压或省略，也不要把「重置全部」折成两行 */
+button {
+  white-space: nowrap;
 }
 
 .button {
@@ -418,7 +465,9 @@ body::before {
   font-weight: 600;
   padding: 0 14px;
   cursor: pointer;
-  transition: transform 130ms ease, filter 130ms ease;
+  transition:
+    transform 130ms ease,
+    filter 130ms ease;
 }
 
 .button:hover {
@@ -547,6 +596,94 @@ body::before {
   gap: 8px;
 }
 
+/* 窄屏下历史请求折叠成一行入口，点开才占用空间。
+   整行都是热区：宽度撑满 panel-head，点击文字右侧的空白也能展开 */
+.list-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 负 margin 左右各 -8px 让 hover 背景向两侧出血，宽度必须同步补 16px：
+     写死 100% 时负的左 margin 只会把盒子整体左移（右 margin 失效），背景会偏左 8px */
+  width: calc(100% + 16px);
+  /* 负 margin 必须左右对称：之前是 -4/-8，hover 背景整体左偏 4px；
+     对称后背景居中于父元素，且左右内边距与父盒内容边对齐 */
+  padding: 5px 8px;
+  margin: -5px -8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 把标题行拉满，按钮才能覆盖整行（≤760px 时 panel-head 是 column +
+   align-items:flex-start，flex:1 只影响高度，所以必须显式给 width） */
+.list-panel .section-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+/* 折叠态右侧只读展示当前选中的请求，不参与交互 */
+.list-panel-current {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.list-panel-toggle:hover {
+  background: var(--accent-soft);
+}
+
+.list-panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.list-panel-caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4.5px solid currentColor;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  transition: transform 0.15s;
+}
+
+.list-panel-caret.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.list-panel-count {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.list-panel-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.list-panel.is-collapsed .panel-head {
+  margin-bottom: 0;
+}
+
+/* 折叠态只保留标题行：清除 / 导出随列表一起收进展开区 */
+.list-panel.is-collapsed .panel-actions {
+  display: none;
+}
+
 .panel-actions {
   display: inline-flex;
   align-items: center;
@@ -591,7 +728,9 @@ body::before {
   color: var(--text-soft);
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
 .list-load-more:hover:not(:disabled) {
@@ -631,7 +770,9 @@ body::before {
   border-radius: 999px;
   background: var(--scroll-thumb);
   opacity: 0.92;
-  transition: background-color 140ms ease, opacity 140ms ease;
+  transition:
+    background-color 140ms ease,
+    opacity 140ms ease;
 }
 
 .record-list-scroll:hover .simplebar-scrollbar::before,
@@ -767,6 +908,42 @@ body::before {
   gap: 8px;
 }
 
+/* 帧数一多就很难扫读，给一个一次性收起/放开的入口 */
+.sse-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sse-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.sse-toggle-all {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-soft);
+  font-family: var(--font-body);
+  font-size: 11px;
+  height: var(--control-h-mini);
+  padding: 0 10px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.sse-toggle-all:hover {
+  color: var(--accent-strong);
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
 .sse-event {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -774,14 +951,51 @@ body::before {
   padding: 8px 10px;
 }
 
+/* 整行标题都可点击，不必精确命中括号或某几个字 */
 .sse-event-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-soft);
+  cursor: pointer;
+}
+
+.sse-event-head:hover .sse-event-name,
+.sse-event-head:hover .sse-event-index {
+  color: var(--accent-strong);
+}
+
+.sse-event-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* 折叠态下标题下方不需要留白 */
+.sse-event-head[aria-expanded="false"] {
+  margin-bottom: 0;
+}
+
+.sse-event-caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4.5px solid currentColor;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  transition: transform 0.15s;
+}
+
+.sse-event-caret.is-collapsed {
+  transform: rotate(-90deg);
 }
 
 .sse-event-index {
@@ -846,7 +1060,9 @@ body::before {
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 100ms ease, background-color 120ms ease;
+  transition:
+    opacity 100ms ease,
+    background-color 120ms ease;
 }
 
 .record-item:hover .record-delete,
@@ -879,14 +1095,22 @@ body::before {
 }
 
 .record-tag[data-tone="rule"] {
-  background: color-mix(in srgb, var(--accent, var(--accent-strong)) 18%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--accent, var(--accent-strong)) 18%,
+    transparent
+  );
   color: var(--accent-strong);
 }
 
+/* 必须显式声明单列轨道：隐式轨道是 auto，会被长 URL 的 min-content 撑到
+   比面板还宽（实测 1024px 下轨道 842px / 面板 656px），右侧按钮直接被 overflow:hidden 裁掉 */
 .detail-layout {
   height: 100%;
   min-height: 0;
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
 }
@@ -919,7 +1143,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: color 130ms ease, border-color 130ms ease;
+  transition:
+    color 130ms ease,
+    border-color 130ms ease;
 }
 
 .detail-tab:hover {
@@ -956,6 +1182,7 @@ body::before {
 
 .detail-head {
   margin-bottom: 0;
+  min-width: 0;
 }
 
 .detail-head-row {
@@ -963,16 +1190,24 @@ body::before {
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
 }
 
+/* 按钮组不参与收缩，永远贴在右侧并跟随父盒子右边界；
+   宽度不够时让标题换行，而不是把按钮挤成两行或挤出可视区 */
 .detail-head-actions {
   display: inline-flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
 .detail-title {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 16px;
   line-height: 1.32;
   word-break: break-word;
@@ -1011,11 +1246,65 @@ body::before {
   gap: 8px;
   align-content: start;
   min-height: 0;
+  min-width: 0;
   overflow: visible;
   padding-right: 2px;
 }
 
+/* 工具型面板会被用户随意缩窄，内容区一律跟随父盒子：
+   不留固定宽度、不靠挤压换行撑破布局，超宽的部分由容器自己横向滚动。 */
+.right-column,
+.detail-panel,
+.detail-layout,
+.detail-column > * {
+  min-width: 0;
+}
+
+/* 卡片内所有承载真实数据的块都参与横向滚动，不撑破卡片 */
+.detail-column :where(pre, .json-view, .payload-table, table, .sse-event-list) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* 横向滚动条默认很粗，压扁它避免吃掉内容高度 */
+.detail-column
+  :where(
+    pre,
+    .json-view,
+    .payload-table,
+    table,
+    .sse-event-list
+  )::-webkit-scrollbar {
+  height: 8px;
+}
+
+.detail-column
+  :where(
+    pre,
+    .json-view,
+    .payload-table,
+    table,
+    .sse-event-list
+  )::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--scroll-thumb);
+}
+
+.detail-column
+  :where(
+    pre,
+    .json-view,
+    .payload-table,
+    table,
+    .sse-event-list
+  )::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: var(--scroll-track);
+}
+
 .detail-card {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
@@ -1031,6 +1320,7 @@ body::before {
 }
 
 .detail-card-title {
+  flex: 1 1 auto;
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -1039,6 +1329,7 @@ body::before {
 }
 
 .detail-card-actions {
+  flex: 0 0 auto;
   display: inline-flex;
   gap: 6px;
 }
@@ -1230,6 +1521,29 @@ body::before {
   color: #b45309;
 }
 
+/* vue-json-pretty 的 showIcon 默认 false，折叠三角压根不渲染，用户只能去点括号。
+   开启后三角渲染在 .vjs-indent 的右端（紧贴 key / 括号），这里只做可见性增强，
+   不动它的定位。 */
+.json-view .vjs-tree-node .vjs-carets {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 20px;
+  border-radius: var(--radius-xs);
+  color: var(--line-strong);
+}
+
+/* 只高亮三角本身：给 14px 的方块加 hover 背景会盖住左侧文字 */
+.json-view .vjs-tree-node .vjs-carets:hover {
+  color: var(--accent-strong);
+}
+
+/* 默认只在悬停该行时才明显；行内 hover 时提前给一点提示，降低发现成本 */
+.json-view .vjs-tree-node:hover > .vjs-carets {
+  color: var(--accent);
+}
+
 .json-view .vjs-tree-node:hover,
 .json-view .vjs-tree-node.is-highlight {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -1396,6 +1710,35 @@ body::before {
     height: auto;
     min-height: 100vh;
     overflow: visible;
+    /* 让标题与转发地址同行：把 workspace / left-column 两层的盒子"拆掉"，
+       使它们的子元素直接成为 .dashboard 的网格项，才能跨层级重新排布。 */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .workspace,
+  .left-column {
+    display: contents;
+  }
+
+  .topbar {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .target-hub {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .list-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .right-column {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
 
   .topbar {
@@ -1407,22 +1750,19 @@ body::before {
     align-items: baseline;
   }
 
-  .workspace {
-    grid-template-columns: 1fr;
-    min-height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-
   .left-column,
   .right-column {
     min-height: auto;
     overflow: visible;
   }
 
-  .list-panel,
   .detail-panel {
     overflow: visible;
+  }
+
+  .list-panel {
+    /* 折叠态下不需要内部滚动高度 */
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .record-list-scroll,
@@ -1452,17 +1792,20 @@ body::before {
     gap: 10px;
   }
 
-  .button,
-  .panel-button,
-  .topbar-action-button {
+  /* 面板里的「清除 / 导出 JSON」不参与撑满，否则会被挤成上下两行 */
+  .topbar-action-button,
+  .button:not(.panel-button) {
     width: 100%;
   }
 
-  .panel-head,
-  .panel-actions,
-  .detail-head-row {
+  .panel-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  /* 清除 / 导出 JSON 保持同一行（不再跟着 panel-head 一起竖排），放不下才换行 */
+  .panel-actions {
+    flex-wrap: wrap;
   }
 
   .title-note {

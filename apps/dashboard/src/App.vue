@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import JsonPretty from "vue-json-pretty";
+import JsonView from "./components/JsonView.vue";
 import SimpleBar from "simplebar-vue";
 import hljs from "highlight.js";
 import xml from "highlight.js/lib/languages/xml";
@@ -15,6 +15,7 @@ import FilterPicker from "./components/FilterPicker.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import TargetFormModal from "./components/TargetFormModal.vue";
 import ToastMessages from "./components/ToastMessages.vue";
+import SseEventList from "./components/SseEventList.vue";
 import type { ProxyGroup, ProxyHeaders, ProxyRule } from "@proxira/core";
 import { redactHeaders, redactText } from "./utils/redact.js";
 import { useProxira } from "./composables/useProxira.js";
@@ -116,6 +117,20 @@ const { toastMessages, pushToast, dismissToast, clearAllToasts } = useToasts();
 
 const requestBodyCodeRef = ref<HTMLElement>();
 const responseBodyCodeRef = ref<HTMLElement>();
+
+// 窄屏下历史请求列表会挤在详情上方，改成可折叠面板：默认收起，
+// 选中某条后自动收起，让详情立刻可见。
+const NARROW_QUERY = "(max-width: 960px)";
+const isNarrow = ref(false);
+const listPanelExpanded = ref(false);
+let narrowMedia: MediaQueryList | null = null;
+const syncNarrow = (): void => {
+  isNarrow.value = narrowMedia?.matches ?? false;
+  // 回到宽屏时列表始终展开，避免残留一个空面板。
+  if (!isNarrow.value) {
+    listPanelExpanded.value = false;
+  }
+};
 
 const methodFilter = ref<MethodFilter>("ALL");
 const statusFilter = ref<StatusFilter>("ALL");
@@ -335,6 +350,14 @@ const onTargetSelect = (nextTargetId: string): void => {
 
 const onSelectRecord = (recordId: string): void => {
   selectedRecordId.value = recordId;
+  // 窄屏下选完就把列表收回去，否则详情被顶在下面还得手动滚。
+  if (isNarrow.value) {
+    listPanelExpanded.value = false;
+  }
+};
+
+const toggleListPanel = (): void => {
+  listPanelExpanded.value = !listPanelExpanded.value;
 };
 
 const openCreateTargetModal = (): void => {
@@ -547,6 +570,10 @@ const displayResponseHeaders = computed<ProxyHeaders>(() =>
 );
 
 onMounted(async () => {
+  narrowMedia = window.matchMedia(NARROW_QUERY);
+  narrowMedia.addEventListener("change", syncNarrow);
+  syncNarrow();
+
   try {
     await fetchConfig();
     await fetchRecords();
@@ -559,6 +586,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  narrowMedia?.removeEventListener("change", syncNarrow);
+  narrowMedia = null;
   clearAllToasts();
 });
 </script>
@@ -657,9 +686,29 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <aside class="card list-panel">
+        <aside class="card list-panel" :class="{ 'is-collapsed': isNarrow && !listPanelExpanded }">
           <div class="panel-head">
-            <h2 class="section-title">历史请求</h2>
+            <h2 class="section-title">
+              <button
+                v-if="isNarrow"
+                class="list-panel-toggle"
+                type="button"
+                :aria-expanded="listPanelExpanded"
+                @click="toggleListPanel"
+              >
+                <span
+                  class="list-panel-caret"
+                  :class="{ 'is-collapsed': !listPanelExpanded }"
+                  aria-hidden="true"
+                ></span>
+                历史请求
+                <span class="list-panel-count">{{ filteredRecords.length }}</span>
+                <span v-if="selectedRecord" class="list-panel-current">
+                  {{ selectedRecord.method }} {{ selectedRecord.path }}
+                </span>
+              </button>
+              <template v-else>历史请求</template>
+            </h2>
             <div class="panel-actions">
               <button class="button button-ghost panel-button panel-button-danger" :disabled="clearingRecords" @click="clearRecords">
                 {{ clearingRecords ? "清除中..." : "清除" }}
@@ -670,14 +719,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="list-tools">
-            <input
-              v-model="searchText"
-              class="list-search"
-              type="search"
-              placeholder="搜索 path…"
-              aria-label="按路径搜索请求"
-            />
+          <div v-show="!isNarrow || listPanelExpanded" class="list-panel-body">
+            <div class="list-tools">
+              <input
+                v-model="searchText"
+                class="list-search"
+                type="search"
+                placeholder="搜索 path…"
+                aria-label="按路径搜索请求"
+              />
             <div class="list-filter-row">
               <FilterPicker
                 class="list-filter-item"
@@ -771,6 +821,7 @@ onBeforeUnmount(() => {
           >
             {{ recordsLoadingMore ? "加载中..." : `加载更多（已显示 ${records.length} / ${recordsTotal}）` }}
           </button>
+          </div>
         </aside>
       </aside>
 
@@ -844,7 +895,7 @@ onBeforeUnmount(() => {
                         复制
                       </button>
                     </div>
-                    <JsonPretty class="json-view" :data="selectedRecord.query" />
+                    <JsonView :data="selectedRecord.query" />
                   </article>
 
                   <article v-if="activeDetailTab === 'request-headers'" class="detail-card">
@@ -858,7 +909,7 @@ onBeforeUnmount(() => {
                         复制
                       </button>
                     </div>
-                    <JsonPretty class="json-view" :data="displayRequestHeaders as ProxyHeaders" />
+                    <JsonView :data="displayRequestHeaders as ProxyHeaders" />
                   </article>
 
                   <article v-if="activeDetailTab === 'request-body'" class="detail-card">
@@ -889,31 +940,13 @@ onBeforeUnmount(() => {
                     <pre v-if="requestBodyCollapsed">
                       内容较大（{{ formatBytes(selectedRecord.requestBody.size) }}），已折叠，点击"展开"查看。
                     </pre>
-                    <div
+                    <SseEventList
                       v-else-if="bodyUsesSseEvents(requestBodyView)"
-                      class="sse-events"
-                    >
-                      <article
-                        v-for="(evt, evtIndex) in requestBodyView.sseEvents ?? []"
-                        :key="`sse-req-${evtIndex}`"
-                        class="sse-event"
-                      >
-                        <div class="sse-event-head">
-                          <span class="sse-event-index">{{ evtIndex + 1 }}</span>
-                          <span class="sse-event-name" :class="{ 'is-message': evt.event === 'message' }">{{ evt.event }}</span>
-                          <span v-if="evt.id" class="sse-event-id">id: {{ evt.id }}</span>
-                        </div>
-                        <JsonPretty
-                          v-if="evt.jsonData !== null"
-                          class="json-view"
-                          :data="evt.jsonData as any"
-                        />
-                        <pre v-else class="sse-event-raw">{{ evt.data }}</pre>
-                      </article>
-                    </div>
-                    <JsonPretty
+                      :events="requestBodyView.sseEvents"
+                      :truncated="requestBodyView.truncated"
+                    />
+                    <JsonView
                       v-else-if="bodyUsesJsonTree(requestBodyView)"
-                      class="json-view"
                       :data="requestBodyView.jsonData as any"
                     />
                     <div v-else-if="bodyUsesCsvTable(requestBodyView)" class="table-view">
@@ -986,7 +1019,7 @@ onBeforeUnmount(() => {
                         复制
                       </button>
                     </div>
-                    <JsonPretty class="json-view" :data="displayResponseHeaders as ProxyHeaders" />
+                    <JsonView :data="displayResponseHeaders as ProxyHeaders" />
                   </article>
 
                   <article v-if="activeDetailTab === 'response-body'" class="detail-card">
@@ -1017,34 +1050,13 @@ onBeforeUnmount(() => {
                     <pre v-if="responseBodyCollapsed">
                       内容较大（{{ formatBytes(selectedRecord.responseBody?.size ?? 0) }}），已折叠，点击"展开"查看。
                     </pre>
-                    <div
+                    <SseEventList
                       v-else-if="bodyUsesSseEvents(responseBodyView)"
-                      class="sse-events"
-                    >
-                      <p v-if="responseBodyView.truncated" class="sub-note sse-truncated-note">
-                        流较长，仅采样了前部分事件，完整内容请用上游日志核对。
-                      </p>
-                      <article
-                        v-for="(evt, evtIndex) in responseBodyView.sseEvents ?? []"
-                        :key="`sse-resp-${evtIndex}`"
-                        class="sse-event"
-                      >
-                        <div class="sse-event-head">
-                          <span class="sse-event-index">{{ evtIndex + 1 }}</span>
-                          <span class="sse-event-name" :class="{ 'is-message': evt.event === 'message' }">{{ evt.event }}</span>
-                          <span v-if="evt.id" class="sse-event-id">id: {{ evt.id }}</span>
-                        </div>
-                        <JsonPretty
-                          v-if="evt.jsonData !== null"
-                          class="json-view"
-                          :data="evt.jsonData as any"
-                        />
-                        <pre v-else class="sse-event-raw">{{ evt.data }}</pre>
-                      </article>
-                    </div>
-                    <JsonPretty
+                      :events="responseBodyView.sseEvents"
+                      :truncated="responseBodyView.truncated"
+                    />
+                    <JsonView
                       v-else-if="bodyUsesJsonTree(responseBodyView)"
-                      class="json-view"
                       :data="responseBodyView.jsonData as any"
                     />
                     <div v-else-if="bodyUsesCsvTable(responseBodyView)" class="table-view">
