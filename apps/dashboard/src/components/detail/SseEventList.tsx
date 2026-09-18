@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { SseEventView } from "../../lib/body";
 import { JsonTree } from "./JsonTree";
+import { ToolbarButton, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
 import { cn } from "../../lib/cn";
 
 /** SSE：逐帧折叠 + 全局折叠/展开，JSON 帧直接走树视图。 */
@@ -9,10 +10,12 @@ export const SseEventList = ({
   events,
   truncated,
   query = "",
+  toolbarExtra,
 }: {
   events: SseEventView[];
   truncated?: boolean;
   query?: string;
+  toolbarExtra?: ReactNode;
 }) => {
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(() => new Set());
 
@@ -26,27 +29,26 @@ export const SseEventList = ({
     });
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[12px] text-fg-soft">{events.length} 个事件</span>
-        <button
-          type="button"
+    <ViewerFrame>
+      <ViewerToolbar>
+        <span className="font-mono text-[11px] text-fg-dim">{events.length} 个事件</span>
+        <ToolbarButton
+          label={allCollapsed ? "全部展开" : "全部折叠"}
           onClick={() =>
             setCollapsed(allCollapsed ? new Set() : new Set(events.map((_, index) => index)))
           }
-          className="rounded-sm px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent-soft"
-        >
-          {allCollapsed ? "全部展开" : "全部折叠"}
-        </button>
-      </div>
+        />
+        {toolbarExtra}
+      </ViewerToolbar>
 
-      {truncated ? (
-        <p className="m-0 text-[11px] text-fg-dim">
-          流较长，仅采样了前部分事件，完整内容请用上游日志核对。
-        </p>
-      ) : null}
+      <ViewerBody className="px-2">
+        {truncated ? (
+          <p className="m-0 px-0.5 py-1 text-[11px] text-fg-dim">
+            流较长，仅采样了前部分事件，完整内容请用上游日志核对。
+          </p>
+        ) : null}
 
-      <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
+        <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
         {events.map((event, index) => {
           const isCollapsed = collapsed.has(index);
           return (
@@ -99,6 +101,7 @@ export const SseEventList = ({
           );
         })}
       </ol>
-    </div>
+      </ViewerBody>
+    </ViewerFrame>
   );
 };

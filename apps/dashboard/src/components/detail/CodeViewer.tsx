@@ -5,9 +5,14 @@ import yaml from "highlight.js/lib/languages/yaml";
 import markdown from "highlight.js/lib/languages/markdown";
 import http from "highlight.js/lib/languages/http";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Copy, WrapText } from "lucide-react";
-import { writeClipboard } from "../../hooks/useCopy";
-import { toast } from "../../store/toast";
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, WrapText } from "lucide-react";
+import {
+  ToolbarButton,
+  ToolbarGroup,
+  ViewerBody,
+  ViewerFrame,
+  ViewerToolbar,
+} from "./ViewerShell";
 import { cn } from "../../lib/cn";
 
 // 只注册面板真正会遇到的语法，别把整包 highlight.js 拉进 bundle。
@@ -181,7 +186,6 @@ export const CodeViewer = ({
   className,
   maxHeight = 560,
   toolbarExtra,
-  copyLabel = "内容",
 }: {
   code: string;
   language?: CodeLanguage;
@@ -189,7 +193,6 @@ export const CodeViewer = ({
   className?: string;
   maxHeight?: number;
   toolbarExtra?: ReactNode;
-  copyLabel?: string;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 控制台默认不换行；长行横向滚，和 DevTools 一致。
@@ -377,53 +380,27 @@ export const CodeViewer = ({
   }
 
   return (
-    <div className={cn("overflow-hidden rounded-md border border-line bg-surface-2", className)}>
-      <div className="flex flex-wrap items-center gap-1 border-b border-line bg-surface-3/50 px-2 py-1">
-        {toolbarExtra}
-
+    <ViewerFrame className={className}>
+      <ViewerToolbar>
         {foldableLines.length > 0 ? (
-          <button
-            type="button"
+          <ToolbarButton
+            label={allFolded ? "全部展开" : "全部折叠"}
             onClick={toggleFoldAll}
-            className={cn(
-              "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
-              "text-fg-dim transition-colors hover:bg-surface-3 hover:text-fg",
-            )}
-          >
-            {allFolded ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
-            {allFolded ? "全部展开" : "全部折叠"}
-          </button>
+            icon={allFolded ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
+          />
         ) : null}
 
-        <button
-          type="button"
+        <ToolbarButton
+          label={wrap ? "不换行" : "自动换行"}
           onClick={() => setWrap((value) => !value)}
-          className={cn(
-            "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
-            "text-fg-dim transition-colors hover:bg-surface-3 hover:text-fg",
-          )}
-        >
-          <WrapText className="size-3" />
-          {wrap ? "不换行" : "自动换行"}
-        </button>
+          active={wrap}
+          icon={<WrapText className="size-3" />}
+        />
 
-        <button
-          type="button"
-          onClick={() => {
-            void writeClipboard(code).then((ok) => {
-              toast[ok ? "success" : "error"](ok ? `已复制${copyLabel}` : "复制失败");
-            });
-          }}
-          className={cn(
-            "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
-            "text-fg-dim transition-colors hover:bg-surface-3 hover:text-fg",
-          )}
-        >
-          <Copy className="size-3" />
-          复制
-        </button>
+        {/* 复制/下载这类操作统一排在折叠控件之后，和树形工具栏的顺序保持一致 */}
+        {toolbarExtra}
 
-        <div className="ml-auto flex items-center gap-1">
+        <ToolbarGroup>
           {query.trim().length > 0 && matches.length === 0 ? (
             <span className="font-mono text-[11px] text-warning">无匹配</span>
           ) : null}
@@ -453,14 +430,10 @@ export const CodeViewer = ({
             </button>
             </>
           ) : null}
-        </div>
-      </div>
+        </ToolbarGroup>
+      </ViewerToolbar>
 
-      <div
-        ref={scrollRef}
-        className="overflow-auto py-1"
-        style={{ maxHeight }}
-      >
+      <ViewerBody scrollRef={scrollRef} maxHeight={maxHeight}>
         {rows}
         {lines.length > renderCount ? (
           <button
@@ -472,7 +445,7 @@ export const CodeViewer = ({
             {lines.length - renderCount} 行
           </button>
         ) : null}
-      </div>
-    </div>
+      </ViewerBody>
+    </ViewerFrame>
   );
 };

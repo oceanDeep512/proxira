@@ -6,10 +6,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronRight, Copy } from "lucide-react";
+import { ChevronRight, Copy, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { isSensitiveKey } from "../../lib/redact";
 import { writeClipboard } from "../../hooks/useCopy";
 import { toast } from "../../store/toast";
+import {
+  ToolbarButton,
+  ToolbarGroup,
+  ViewerBody,
+  ViewerFrame,
+  ViewerToolbar,
+} from "./ViewerShell";
 import { cn } from "../../lib/cn";
 
 /* ------------------------------------------------------------------ *
@@ -104,6 +111,16 @@ const collectMatchPaths = (value: unknown, query: string, path: string, out: Set
   return hit;
 };
 
+/** 缩进参考线：每层一条竖线，让深层嵌套能一眼看出层级（代码阅读框观感）。 */
+const IndentGuides = ({ depth }: { depth: number }) =>
+  depth <= 0 ? null : (
+    <span className="flex shrink-0 self-stretch" aria-hidden>
+      {Array.from({ length: depth }, (_, level) => (
+        <span key={level} className="w-[14px] shrink-0 self-stretch border-l border-line/60" />
+      ))}
+    </span>
+  );
+
 const Row = ({
   depth,
   path,
@@ -115,11 +132,8 @@ const Row = ({
   children: ReactNode;
   onCopy?: () => void;
 }) => (
-  <div
-    className="json-row group/row"
-    style={{ paddingLeft: `${depth * 14}px` }}
-    data-path={path}
-  >
+  <div className="json-row group/row" data-path={path}>
+    <IndentGuides depth={depth} />
     {children}
     {onCopy ? (
       <button
@@ -266,7 +280,8 @@ const JsonNode = ({
           ))}
 
           {hidden > 0 ? (
-            <div style={{ paddingLeft: `${(depth + 1) * 14}px` }} className="py-1">
+            <div className="flex items-center py-1">
+              <IndentGuides depth={depth + 1} />
               <button
                 type="button"
                 onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
@@ -306,11 +321,15 @@ export const JsonTree = ({
   query = "",
   className,
   withToolbar = false,
+  toolbarExtra,
+  maxHeight = 560,
 }: {
   data: unknown;
   query?: string;
   className?: string;
   withToolbar?: boolean;
+  toolbarExtra?: ReactNode;
+  maxHeight?: number;
 }) => {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -347,36 +366,48 @@ export const JsonTree = ({
   }
 
   const allCollapsed = containerPaths.size > 0 && collapsed.size >= containerPaths.size;
+  const toggleAll = (): void =>
+    setCollapsed(allCollapsed ? new Set<string>() : new Set(containerPaths));
+
+  const statsText = query.trim()
+    ? `${matchPaths.size} 处命中 · ${containerPaths.size} 个节点`
+    : `${containerPaths.size} 个节点`;
+
+  // 带工具栏时套「代码阅读框」外壳，和原始视图保持同一套边框/圆角/菜单条。
+  if (withToolbar) {
+    return (
+      <TreeContext.Provider value={ctx}>
+        <ViewerFrame className={className}>
+          <ViewerToolbar>
+            <span className="font-mono text-[11px] text-fg-dim">{statsText}</span>
+            {containerPaths.size > 0 ? (
+              <ToolbarButton
+                label={allCollapsed ? "全部展开" : "全部折叠"}
+                onClick={toggleAll}
+                icon={allCollapsed ? <ChevronsUpDown className="size-3" /> : <ChevronsDownUp className="size-3" />}
+              />
+            ) : null}
+            {toolbarExtra}
+            <ToolbarGroup>
+              {query.trim().length > 0 && matchPaths.size === 0 ? (
+                <span className="font-mono text-[11px] text-warning">无匹配</span>
+              ) : null}
+            </ToolbarGroup>
+          </ViewerToolbar>
+          <ViewerBody maxHeight={maxHeight} className="px-2">
+            <div className="json-tree">
+              <JsonNode value={data} depth={0} path="" />
+            </div>
+          </ViewerBody>
+        </ViewerFrame>
+      </TreeContext.Provider>
+    );
+  }
 
   return (
     <TreeContext.Provider value={ctx}>
       <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-        {withToolbar ? (
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-fg-dim">
-              {query.trim()
-                ? `${matchPaths.size} 处命中 · ${containerPaths.size} 个可折叠节点`
-                : `${containerPaths.size} 个可折叠节点`}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setCollapsed(new Set(containerPaths))}
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-surface-3 hover:text-fg"
-              >
-                全部折叠
-              </button>
-              <button
-                type="button"
-                onClick={() => setCollapsed(new Set())}
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-surface-3 hover:text-fg"
-              >
-                全部展开
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {allCollapsed && withToolbar ? (
+        {allCollapsed ? (
           <p className="m-0 text-[11px] text-fg-dim">全部节点已折叠。</p>
         ) : null}
         <div className="json-tree overflow-x-auto">

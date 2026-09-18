@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Braces, Copy, Download, Search, UnfoldVertical } from "lucide-react";
 import type { BodyView } from "../../lib/body";
 import {
@@ -13,10 +13,9 @@ import { formatBytes, toPrettyJson } from "../../lib/format";
 import { useCopy } from "../../hooks/useCopy";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
-import { IconButton } from "../ui/IconButton";
 import { Pill } from "../ui/Pill";
 import { Segmented } from "../ui/Segmented";
-import { Tooltip } from "../ui/Tooltip";
+import { ToolbarButton, ViewerBody, ViewerFrame, ViewerToolbar } from "./ViewerShell";
 import { CodeViewer, languageForMode } from "./CodeViewer";
 import { CsvTable } from "./CsvTable";
 import { JsonTree } from "./JsonTree";
@@ -100,37 +99,6 @@ export const BodyViewer = ({
 
   const lineCount = useMemo(() => rawText.split("\n").length, [rawText]);
 
-  // 单独提出来，避免深层三元嵌套里数错括号（可读性也比内联好）。
-  const rawNode = rawText ? (
-    <CodeViewer
-      code={rawText}
-      language={languageForMode(view.mode)}
-      query={query}
-      maxHeight={560}
-      copyLabel={copyLabel}
-      toolbarExtra={
-        jsonFallback ? (
-          <button
-            type="button"
-            onClick={() => setMinified((value) => !value)}
-            className={cn(
-              "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
-              "text-fg-dim transition-colors hover:bg-surface-3 hover:text-fg",
-            )}
-          >
-            <Braces className="size-3" />
-            {minified ? "格式化" : "压缩"}
-          </button>
-        ) : null
-      }
-    />
-  ) : (
-    <EmptyState
-      title="没有正文内容"
-      hint={view.note || "该方向没有记录到正文（可能是空响应或流式响应未捕获）。"}
-    />
-  );
-
   const download = (): void => {
     const blob = new Blob([bodyViewToCopyText(view)], {
       type: `${contentType || "text/plain"}; charset=utf-8`,
@@ -144,6 +112,46 @@ export const BodyViewer = ({
     link.remove();
     URL.revokeObjectURL(url);
   };
+
+  // 复制 / 下载统一挂在内容面板的顶部菜单里：这样切「树形 / 原始 / 表格 / 预览」
+  // 时标题行的按钮数量永远一致，不会左右跳动。
+  const actions: ReactNode = (
+    <>
+      <ToolbarButton
+        label="复制"
+        icon={<Copy className="size-3" />}
+        onClick={() => void copy(copyLabel, bodyViewToCopyText(view))}
+      />
+      <ToolbarButton label="下载" icon={<Download className="size-3" />} onClick={download} />
+    </>
+  );
+
+  // 单独提出来，避免深层三元嵌套里数错括号（可读性也比内联好）。
+  const rawNode = rawText ? (
+    <CodeViewer
+      code={rawText}
+      language={languageForMode(view.mode)}
+      query={query}
+      maxHeight={560}
+      toolbarExtra={
+        <>
+          {jsonFallback ? (
+            <ToolbarButton
+              label={minified ? "格式化" : "压缩"}
+              icon={<Braces className="size-3" />}
+              onClick={() => setMinified((value) => !value)}
+            />
+          ) : null}
+          {actions}
+        </>
+      }
+    />
+  ) : (
+    <EmptyState
+      title="没有正文内容"
+      hint={view.note || "该方向没有记录到正文（可能是空响应或流式响应未捕获）。"}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -184,6 +192,7 @@ export const BodyViewer = ({
             />
           </label>
 
+          {/* 复制/下载已移进内容面板顶部菜单，这里只留搜索与视图切换，切视图不再跳布局 */}
           {options.length > 1 ? (
             <Segmented
               ariaLabel={`${copyLabel} 视图`}
@@ -192,28 +201,6 @@ export const BodyViewer = ({
               options={options}
             />
           ) : null}
-
-          {/* 原始视图的代码面板自带复制按钮，这里就不再重复一个 */}
-          {activeMode === "raw" ? null : (
-            <Tooltip label={`复制${copyLabel}`}>
-              <IconButton
-                label={`复制${copyLabel}`}
-                className="size-7 [&_svg]:size-3.5"
-                onClick={() => void copy(copyLabel, bodyViewToCopyText(view))}
-              >
-                <Copy />
-              </IconButton>
-            </Tooltip>
-          )}
-          <Tooltip label="保存为文件">
-            <IconButton
-              label="保存为文件"
-              className="size-7 [&_svg]:size-3.5"
-              onClick={download}
-            >
-              <Download />
-            </IconButton>
-          </Tooltip>
         </div>
       </div>
 
@@ -237,21 +224,44 @@ export const BodyViewer = ({
           </Button>
         </div>
       ) : activeMode === "tree" ? (
-        <JsonTree data={view.jsonData} query={query} withToolbar />
+        <JsonTree data={view.jsonData} query={query} withToolbar toolbarExtra={actions} />
       ) : activeMode === "sse" ? (
-        <SseEventList events={view.sseEvents ?? []} truncated={view.truncated} query={query} />
+        <SseEventList
+          events={view.sseEvents ?? []}
+          truncated={view.truncated}
+          query={query}
+          toolbarExtra={actions}
+        />
       ) : activeMode === "table" && view.csvTable ? (
-        <CsvTable
-          headers={view.csvTable.headers}
-          rows={view.csvTable.rows}
-          totalRows={view.csvTable.totalRows}
-          visibleRows={view.csvTable.visibleRows}
-        />
+        <ViewerFrame>
+          <ViewerToolbar>
+            <span className="font-mono text-[11px] text-fg-dim">
+              {view.csvTable.totalRows} 行 · {view.csvTable.headers.length} 列
+            </span>
+            {actions}
+          </ViewerToolbar>
+          <ViewerBody className="px-2">
+            <CsvTable
+              headers={view.csvTable.headers}
+              rows={view.csvTable.rows}
+              totalRows={view.csvTable.totalRows}
+              visibleRows={view.csvTable.visibleRows}
+            />
+          </ViewerBody>
+        </ViewerFrame>
       ) : activeMode === "preview" ? (
-        <div
-          className="rich-preview overflow-auto rounded-md border border-line bg-surface-2 p-3"
-          dangerouslySetInnerHTML={{ __html: view.previewHtml }}
-        />
+        <ViewerFrame>
+          <ViewerToolbar>
+            <span className="font-mono text-[11px] text-fg-dim">富文本预览</span>
+            {actions}
+          </ViewerToolbar>
+          <ViewerBody className="px-3 py-2">
+            <div
+              className="rich-preview"
+              dangerouslySetInnerHTML={{ __html: view.previewHtml }}
+            />
+          </ViewerBody>
+        </ViewerFrame>
       ) : activeMode === "raw" ? rawNode : null}
 
       {view.note && view.mode !== "empty" && !view.truncated ? (

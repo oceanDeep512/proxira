@@ -536,7 +536,8 @@
 }
 
 .json-row:hover {
-  background: var(--px-accent-soft);
+  /* 和 .code-row:hover 用同一档强度，树形 / 原始切换时手感一致 */
+  background: color-mix(in srgb, var(--px-accent) 6%, transparent);
 }
 
 .json-caret {
