@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import type { FileSystemAdapter } from "../app/types.js";
 
 export const createNodeFileSystem = (): FileSystemAdapter => {
@@ -16,6 +16,9 @@ export const createNodeFileSystem = (): FileSystemAdapter => {
     },
     async writeTextFile(path, data) {
       await writeFile(path, data, "utf8");
+    },
+    async rename(from, to) {
+      await rename(from, to);
     },
   };
 };

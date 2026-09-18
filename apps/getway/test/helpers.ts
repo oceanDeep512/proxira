@@ -42,6 +42,15 @@ export class MemoryFileSystem implements FileSystemAdapter {
   async writeTextFile(path: string, data: string): Promise<void> {
     this.files.set(path, data);
   }
+
+  async rename(from: string, to: string): Promise<void> {
+    const value = this.files.get(from);
+    if (value === undefined) {
+      throw new Error(`File not found: ${from}`);
+    }
+    this.files.delete(from);
+    this.files.set(to, value);
+  }
 }
 
 export const createTestConfig = (

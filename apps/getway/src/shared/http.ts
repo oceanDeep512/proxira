@@ -54,6 +54,14 @@ export const isStreamingContentType = (contentType: string | null): boolean => {
   return STREAMING_MIME_TYPES.has(mimeType);
 };
 
+// Statuses that must not carry a body: passing even an empty Uint8Array makes
+// the Response constructor throw ("Invalid response status code"), which used
+// to surface as a bogus 502 for every 204 DELETE and 304 revalidation.
+const BODILESS_STATUS_CODES = new Set([101, 204, 205, 304]);
+
+export const isBodilessStatus = (status: number): boolean =>
+  BODILESS_STATUS_CODES.has(status);
+
 // A request asking to switch protocols (WebSocket handshake, h2c, ...).
 // Forwarding is built on fetch(), which can never complete an upgrade: it has
 // no way to hand back the socket behind a 101 response. Detect these up front

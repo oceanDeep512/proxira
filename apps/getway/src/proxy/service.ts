@@ -16,6 +16,7 @@ import {
   collectHeaders,
     collectQuery,
     describeUpgradeProtocol,
+    isBodilessStatus,
     isStreamingContentType,
     stripHeaders,
     REQUEST_STRIP_HEADERS,
@@ -210,15 +211,36 @@ export class ProxyService {
     const upstreamRequestHeaders = stripHeaders(request.headers, REQUEST_STRIP_HEADERS);
     upstreamRequestHeaders.delete("accept-encoding");
 
+    // The timeout is meant to bound "waiting for the upstream to answer", not
+    // "how long the answer may take to stream". An SSE / LLM stream can run for
+    // minutes; leaving the deadline armed would chop it off mid-flight while
+    // the client keeps reading a truncated stream as if it were complete.
+    // So we own the timer instead of using AbortSignal.timeout() and release it
+    // as soon as a streaming response arrives.
+    const effectiveTimeoutMs =
+      activeGroup.upstreamTimeoutMs ?? this.deps.config.upstreamTimeoutMs;
+    const timeoutController = new AbortController();
+    const timeoutReason = new DOMException(
+      `Upstream did not respond within ${effectiveTimeoutMs}ms.`,
+      "TimeoutError",
+    );
+    const timeoutTimer = setTimeout(
+      () => timeoutController.abort(timeoutReason),
+      effectiveTimeoutMs,
+    );
+    // Never let a pending deadline keep the process alive.
+    timeoutTimer.unref?.();
+    const releaseUpstreamTimeout = (): void => {
+      clearTimeout(timeoutTimer);
+    };
+
     const upstreamRequest: RequestInit = {
       method,
       headers: upstreamRequestHeaders,
       redirect: "manual",
       // A group can override the global budget (e.g. slow non-streaming LLM
       // calls); null means "fall back to the configured default".
-      signal: AbortSignal.timeout(
-        activeGroup.upstreamTimeoutMs ?? this.deps.config.upstreamTimeoutMs,
-      ),
+      signal: timeoutController.signal,
     };
     if (method !== "GET" && method !== "HEAD" && requestBytes.length > 0) {
       upstreamRequest.body = requestBytes;
@@ -239,6 +261,7 @@ export class ProxyService {
         requestBody,
         upstreamUrl: upstreamUrl.toString(),
         upstreamRequest,
+        releaseUpstreamTimeout,
       });
     }
 
@@ -251,6 +274,9 @@ export class ProxyService {
       // the untouched branch immediately, while a background reader samples
       // the capture branch (up to maxBodyCaptureBytes) for the history record.
       if (upstreamResponse.body && isStreamingContentType(contentType)) {
+        // Hand the stream over to streamMaxCaptureMs — the upstream deadline
+        // has done its job (headers are here) and must not cut the stream.
+        releaseUpstreamTimeout();
         const [clientStream, captureStream] = upstreamResponse.body.tee();
         const record = this.createRecord({
           groupId: activeGroup.id,
@@ -286,6 +312,8 @@ export class ProxyService {
       const responseBuffer = await upstreamResponse
         .arrayBuffer()
         .catch(() => new ArrayBuffer(0));
+      // Body fully buffered: the deadline can stand down.
+      releaseUpstreamTimeout();
       const responseBytes = new Uint8Array(responseBuffer);
       const responseBody = collectBody(
         responseBytes,
@@ -314,12 +342,16 @@ export class ProxyService {
         }),
       );
 
-      return new Response(responseBytes, {
-        status: upstreamResponse.status,
+      // 204 / 304 must not carry a body: even an empty Uint8Array makes the
+      // Response constructor throw, which used to surface as a bogus 502.
+      const status = upstreamResponse.status;
+      const bodiless = isBodilessStatus(status);
+      return new Response(bodiless ? null : responseBytes, {
+        status,
         headers: buildDownstreamHeaders(
           upstreamResponse.headers,
           method,
-          responseBytes.byteLength,
+          bodiless ? undefined : responseBytes.byteLength,
         ),
       });
     } catch (error) {
@@ -360,6 +392,10 @@ export class ProxyService {
         },
         { status: timedOut ? 504 : 502 },
       );
+    } finally {
+      // Whatever happened (including the early returns above), the deadline
+      // must not outlive the request.
+      releaseUpstreamTimeout();
     }
   }
 
@@ -635,8 +671,15 @@ export class ProxyService {
     requestBody: ProxyPayloadBody;
     upstreamUrl: string;
     upstreamRequest: RequestInit;
+    releaseUpstreamTimeout: () => void;
   }): Promise<Response> {
     const { rule } = ctx;
+
+    // mock / error rules never touch the upstream, so the upstream deadline
+    // has nothing to bound — release it instead of leaving a timer armed.
+    if (rule.action === "mock" || rule.action === "error") {
+      ctx.releaseUpstreamTimeout();
+    }
 
     if (rule.delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
@@ -712,14 +755,17 @@ export class ProxyService {
         error: null,
       });
       this.runtime.addProxyRecord(ctx.activeGroup.id, record);
-      return new Response(bytes, { status: rule.status, headers: downstreamHeaders });
+      return new Response(
+        isBodilessStatus(rule.status) ? null : bytes,
+        { status: rule.status, headers: downstreamHeaders },
+      );
     }
 
     if (rule.action === "error") {
-      const payload = Response.json(
-        { message: rule.message, rule: rule.name },
-        { status: rule.status },
-      );
+      const bodiless = isBodilessStatus(rule.status);
+      const payload = bodiless
+        ? new Response(null, { status: rule.status })
+        : Response.json({ message: rule.message, rule: rule.name }, { status: rule.status });
       const record = this.createRecord({
         ...base,
         responseStatus: rule.status,
@@ -745,6 +791,8 @@ export class ProxyService {
       const contentType = upstreamResponse.headers.get("content-type");
 
       if (upstreamResponse.body && isStreamingContentType(contentType)) {
+        // Same deal as the plain path: headers are here, the stream may run long.
+        ctx.releaseUpstreamTimeout();
         const [clientStream, captureStream] = upstreamResponse.body.tee();
         const shaped = this.shapeStream(clientStream, rule);
         const [shapedClient, shapedCapture] = shaped.tee();
@@ -772,6 +820,7 @@ export class ProxyService {
       const responseBuffer = await upstreamResponse
         .arrayBuffer()
         .catch(() => new ArrayBuffer(0));
+      ctx.releaseUpstreamTimeout();
       let responseBytes = new Uint8Array(responseBuffer);
       if (rule.action === "truncate" && responseBytes.byteLength > rule.keepBytes) {
         responseBytes = responseBytes.slice(0, rule.keepBytes);
@@ -788,12 +837,15 @@ export class ProxyService {
         error: null,
       });
       this.runtime.addProxyRecord(ctx.activeGroup.id, record);
-      return new Response(responseBytes, {
-        status: upstreamResponse.status,
+
+      const status = upstreamResponse.status;
+      const bodiless = isBodilessStatus(status);
+      return new Response(bodiless ? null : responseBytes, {
+        status,
         headers: buildDownstreamHeaders(
           upstreamResponse.headers,
           ctx.method,
-          responseBytes.byteLength,
+          bodiless ? undefined : responseBytes.byteLength,
         ),
       });
     } catch (error) {
@@ -818,6 +870,8 @@ export class ProxyService {
         },
         { status: timedOut ? 504 : 502 },
       );
+    } finally {
+      ctx.releaseUpstreamTimeout();
     }
   }
 

@@ -493,6 +493,9 @@ export class RuntimeStore {
     this.syncConfigTargetBaseUrl();
     this.saveConfig();
     this.saveHistory();
+    // 规则也要落盘：否则 rules.json 里仍留着已删分组的 mock（含响应体与内部 URL），
+    // 重启后又会复活。
+    this.saveRules();
     this.broadcastEvent({ type: "config", config: this.proxyConfig });
 
     return {
@@ -534,6 +537,8 @@ export class RuntimeStore {
 
     this.saveConfig();
     this.saveHistory();
+    // 同上：reset 必须把 rules.json 一起清空，否则旧规则会在重启后复活。
+    this.saveRules();
     this.broadcastEvent({ type: "config", config: this.proxyConfig });
     this.broadcastEvent({
       type: "records_cleared",

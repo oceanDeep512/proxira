@@ -9,12 +9,22 @@ const DEFAULT_PROXY_PREFIX = "/proxira";
 
 const DEFAULT_HOST = "127.0.0.1";
 
+// 空串 / 空白按「未设置」处理，回落到默认值。
+// ⚠️ 不能写成 Number(raw ?? fallback)：Number("") === 0，再 Math.max(1, 0) 会得到 1，
+// 于是 PROXY_HISTORY_LIMIT= 会把历史上限变成 1、正文上限变成 1 字节。
 const normalizePositiveInteger = (
   raw: string | undefined,
   fallback: number,
 ): number => {
-  const parsed = Number(raw ?? fallback);
-  return Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : fallback;
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(parsed));
 };
 
 const normalizePort = (raw: string | undefined): number => {

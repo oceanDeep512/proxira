@@ -1018,6 +1018,145 @@ const hangingUpstream = (): typeof fetch =>
     });
   });
 
+  it("keeps streaming responses alive past the upstream timeout", async () => {
+    // The deadline must only bound "waiting for headers": a stream that runs
+    // longer than upstreamTimeoutMs used to be cut off mid-flight while the
+    // client kept reading the truncated body as if it were complete.
+    let seenSignal: AbortSignal | null = null;
+    const upstreamFetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const signal = init?.signal ?? null;
+        seenSignal = signal;
+        const encoder = new TextEncoder();
+        let index = 0;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              if (signal?.aborted) {
+                controller.error(new Error("upstream timeout fired"));
+                return;
+              }
+              if (index >= 6) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(encoder.encode(`data: ${index}\n\n`));
+              index += 1;
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      },
+    ) as typeof fetch;
+
+    // 6 frames * 50ms = 300ms, well past the 120ms deadline.
+    const { app } = await createTestApp({
+      fetchImpl: upstreamFetch,
+      configOverrides: { upstreamTimeoutMs: 120 },
+    });
+
+    const response = await app.request("/proxira/stream");
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    expect((text.match(/data:/g) ?? []).length).toBe(6);
+    // The point of the fix: the deadline was released once headers arrived,
+    // so it never fired even though the stream outlived it.
+    expect(seenSignal).not.toBeNull();
+    expect(seenSignal?.aborted).toBe(false);
+  });
+
+  it("forwards bodiless statuses (204 / 304) instead of turning them into 502", async () => {
+    const upstreamFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/gone")) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(null, { status: 304, headers: { etag: "v1" } });
+    }) as typeof fetch;
+    const { app } = await createTestApp({ fetchImpl: upstreamFetch });
+
+    const deleted = await app.request("/proxira/gone", { method: "DELETE" });
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe("");
+
+    const cached = await app.request("/proxira/resource");
+    expect(cached.status).toBe(304);
+
+    const payload = await (
+      await app.request("/_proxira/api/records?limit=10")
+    ).json();
+    expect(payload.items.map((item: { responseStatus: number }) => item.responseStatus)).toEqual([
+      304,
+      204,
+    ]);
+  });
+
+  it("takes rules off disk when their group is deleted or everything is reset", async () => {
+    const { app, runtime, fs, config } = await createTestApp();
+    const rulesOnDisk = async (): Promise<{ groupId: string }[]> => {
+      await runtime.flushPersist();
+      const raw = await fs
+        .readTextFile(config.rulesFile)
+        .catch(() => "[]");
+      return JSON.parse(raw) as { groupId: string }[];
+    };
+
+    const created = await (
+      await app.request("/_proxira/api/groups", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "staging",
+          targetBaseUrl: "http://staging.test",
+        }),
+      })
+    ).json();
+    const groupId = created.group.id as string;
+
+    await app.request(`/_proxira/api/rules?groupId=${groupId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "stub staging",
+        action: "mock",
+        status: 200,
+        body: "{}",
+      }),
+    });
+    expect((await rulesOnDisk()).some((rule) => rule.groupId === groupId)).toBe(true);
+
+    // Deleting the group must drop its rules from rules.json, otherwise they
+    // come back on the next restart.
+    await app.request(`/_proxira/api/groups/${groupId}`, { method: "DELETE" });
+    expect((await rulesOnDisk()).some((rule) => rule.groupId === groupId)).toBe(false);
+
+    // Same for a full reset.
+    await app.request("/_proxira/api/rules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "stub default",
+        action: "mock",
+        status: 200,
+        body: "{}",
+      }),
+    });
+    expect((await rulesOnDisk()).length).toBeGreaterThan(0);
+    await app.request("/_proxira/api/reset", { method: "POST" });
+    expect(await rulesOnDisk()).toHaveLength(0);
+  });
+
   describe("protocol upgrade (WebSocket) requests", () => {
     const handshakeHeaders = {
       connection: "Upgrade",

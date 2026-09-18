@@ -9,6 +9,9 @@ export type FileSystemAdapter = {
   readTextFile(path: string): Promise<string>;
   readBinaryFile(path: string): Promise<Uint8Array>;
   writeTextFile(path: string, data: string): Promise<void>;
+  // Needed for atomic saves (write temp + rename) and for quarantining files
+  // that cannot be parsed instead of silently overwriting them.
+  rename(from: string, to: string): Promise<void>;
 };
 
 export type RuntimeConfig = {
