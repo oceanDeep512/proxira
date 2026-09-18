@@ -221,7 +221,7 @@ const JsonNode = ({
             <button
               type="button"
               onClick={() => setFullText(true)}
-              className="ml-1.5 rounded-sm px-1 text-[11px] text-accent hover:bg-accent-soft"
+              className="ml-1.5 rounded-sm px-1 text-[11px] text-accent-strong hover:bg-accent-soft"
             >
               展开全部 {(value as string).length} 字符
             </button>
@@ -252,7 +252,7 @@ const JsonNode = ({
             <button
               type="button"
               onClick={() => toggle(path)}
-              className="json-count hover:text-accent"
+              className="json-count hover:text-accent-strong"
             >
               {entries.length} {isArray ? "项" : "键"} · 已折叠
             </button>
@@ -285,7 +285,7 @@ const JsonNode = ({
               <button
                 type="button"
                 onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
-                className="rounded-sm px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent-soft"
+                className="rounded-sm px-1.5 py-0.5 text-[11px] text-accent-strong hover:bg-accent-soft"
               >
                 继续渲染 {Math.min(PAGE_SIZE, hidden)} / 剩余 {hidden} 项
               </button>

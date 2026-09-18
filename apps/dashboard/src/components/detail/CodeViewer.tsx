@@ -351,6 +351,7 @@ export const CodeViewer = ({
             className={cn(
               "flex h-[21.5px] w-4 shrink-0 items-center justify-center text-fg-dim",
               "transition-colors hover:text-accent",
+              "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
             )}
           >
             {isFolded ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
@@ -370,7 +371,7 @@ export const CodeViewer = ({
             type="button"
             onClick={() => toggleFold(i)}
             // sticky right：长行横向滚动时，折叠标记别跟着滚出可视区。
-            className="sticky right-0 z-[1] mr-2 shrink-0 rounded-sm bg-surface-3 px-1 text-[11px] text-fg-dim hover:text-accent"
+            className="sticky right-0 z-[1] mr-2 shrink-0 rounded-sm bg-surface-3 px-1 text-[11px] text-fg-dim hover:text-accent-strong"
           >
             … {end - i} 行
           </button>
@@ -416,7 +417,7 @@ export const CodeViewer = ({
               onClick={() =>
                 setMatchIndex((value) => (value - 1 + matches.length) % matches.length)
               }
-              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg"
+              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
             >
               <ChevronUp className="size-3.5" />
             </button>
@@ -424,7 +425,7 @@ export const CodeViewer = ({
               type="button"
               aria-label="下一个匹配"
               onClick={() => setMatchIndex((value) => (value + 1) % matches.length)}
-              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg"
+              className="rounded-sm p-0.5 text-fg-dim hover:bg-surface-3 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
             >
               <ChevronDown className="size-3.5" />
             </button>
@@ -439,7 +440,7 @@ export const CodeViewer = ({
           <button
             type="button"
             onClick={() => setVisibleLines((value) => value + MAX_RENDER_LINES)}
-            className="ml-11 my-1 rounded-sm px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent-soft"
+            className="ml-11 my-1 rounded-sm px-1.5 py-0.5 text-[11px] text-accent-strong hover:bg-accent-soft"
           >
             继续渲染 {Math.min(MAX_RENDER_LINES, lines.length - renderCount)} / 剩余{" "}
             {lines.length - renderCount} 行

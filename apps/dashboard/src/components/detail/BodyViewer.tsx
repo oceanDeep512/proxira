@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Braces, Copy, Download, Search, UnfoldVertical } from "lucide-react";
+import { AlertTriangle, Braces, Copy, Download, FileQuestion, Search, UnfoldVertical } from "lucide-react";
 import type { BodyView } from "../../lib/body";
 import {
   bodyModeLabel,
@@ -148,8 +148,15 @@ export const BodyViewer = ({
     />
   ) : (
     <EmptyState
+      icon={<FileQuestion />}
       title="没有正文内容"
-      hint={view.note || "该方向没有记录到正文（可能是空响应或流式响应未捕获）。"}
+      hint={
+        copyLabel === "请求 Body"
+          ? "该请求没有请求体（GET / HEAD 请求通常没有）。"
+          : (view.note && view.mode !== "empty"
+            ? view.note
+            : "该方向没有记录到正文（可能是空响应或流式响应未捕获）。")
+      }
     />
   );
 

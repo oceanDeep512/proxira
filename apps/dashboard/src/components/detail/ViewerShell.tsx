@@ -56,7 +56,11 @@ export const ToolbarButton = ({
     className={cn(
       "inline-flex min-h-6 items-center gap-1 rounded-sm px-1.5 text-[11px]",
       "transition-colors hover:bg-surface-3 hover:text-fg",
-      active ? "text-accent" : "text-fg-dim",
+      // 菜单按钮本身很小，键盘焦点必须画出来，否则 Tab 过去完全没反馈。
+      "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
+      // 触摸设备上放大到 36px，避免密集菜单变成误触陷阱。
+      "pointer-coarse:min-h-9 pointer-coarse:px-2",
+      active ? "text-accent-strong" : "text-fg-dim",
       className,
     )}
   >

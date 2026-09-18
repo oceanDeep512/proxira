@@ -70,7 +70,8 @@
   --px-line-strong: #b6c4d8;
   --px-text: #101a2b;
   --px-text-soft: #566b87;
-  --px-text-dim: #7c8fa8;
+  /* dim 是时间戳/计数这类次要文字，也必须满足 4.5:1，别再往浅里调 */
+  --px-text-dim: #5d7189;
 
   --px-accent: #6d28d9;
   --px-accent-strong: #5b21b6;
@@ -114,7 +115,7 @@
   --px-line-strong: #37475e;
   --px-text: #e8eef7;
   --px-text-soft: #94a5bc;
-  --px-text-dim: #66788f;
+  --px-text-dim: #7a8ca3;
 
   --px-accent: #8b5cf6;
   --px-accent-strong: #a78bfa;
@@ -260,6 +261,18 @@
   button {
     font: inherit;
     color: inherit;
+  }
+
+  /* 尊重系统的「减弱动效」：状态点 ping、弹层出现、各类过渡一律压到近乎瞬时。 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 

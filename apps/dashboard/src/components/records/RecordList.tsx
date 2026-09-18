@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, Download, RotateCcw, Search, X } from "lucide-react";
+import { ChevronRight, Download, Inbox, RotateCcw, Search, X } from "lucide-react";
 import type { ProxyTrafficRecord } from "@proxira/core";
 import {
   METHOD_FILTER_OPTIONS,
@@ -276,7 +276,26 @@ export const RecordList = ({ isWide }: { isWide: boolean }) => {
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState icon={<Search />} title={emptyLabel} className="flex-1" />
+          <EmptyState
+            icon={records.length === 0 ? <Inbox /> : <Search />}
+            title={emptyLabel}
+            hint={
+              records.length === 0
+                ? "请求经过代理后会出现在这里：用浏览器访问转发地址，或 curl 打一发试试。"
+                : filtersDirty
+                  ? "当前筛选条件筛掉了全部记录，放宽条件或直接重置。"
+                  : undefined
+            }
+            action={
+              filtersDirty ? (
+                <Button size="sm" variant="secondary" onClick={resetFilters}>
+                  <RotateCcw className="size-3.5" />
+                  重置筛选
+                </Button>
+              ) : undefined
+            }
+            className="flex-1"
+          />
         ) : (
           <div
             ref={scrollRef}

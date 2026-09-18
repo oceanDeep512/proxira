@@ -8,9 +8,9 @@ import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../lib/cn";
 
 const connectionMeta = {
-  open: { label: "实时连接", tone: "success" as const },
-  connecting: { label: "连接中", tone: "warning" as const },
-  closed: { label: "已断开", tone: "danger" as const },
+  open: { label: "服务在线", tone: "success" as const },
+  connecting: { label: "服务连接中", tone: "warning" as const },
+  closed: { label: "服务离线", tone: "danger" as const },
 };
 
 export const TopBar = ({
@@ -40,7 +40,7 @@ export const TopBar = ({
         <img
           src={`${import.meta.env.BASE_URL}proxira-logo.svg`}
           alt="Proxira"
-          className="h-9 w-9 shrink-0 select-none object-cover object-left"
+          className="h-11 w-11 shrink-0 select-none object-cover object-left"
         />
         <div className="min-w-0">
           <h1 className="truncate font-display text-[22px] font-semibold leading-none tracking-tight">
