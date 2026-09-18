@@ -73,7 +73,7 @@ export const TargetActions = ({
   };
 
   return (
-    <div ref={rootRef} className={cn("relative shrink-0", className)}>
+    <div ref={rootRef} className={cn("relative inline-flex shrink-0", className)}>
       <button
         type="button"
         aria-label={open ? "收起功能菜单" : "展开功能菜单"}

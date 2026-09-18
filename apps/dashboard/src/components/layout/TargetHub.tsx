@@ -46,10 +46,14 @@ export const TargetHub = ({
         ) : null}
       </div>
 
-      {/* 窄屏这一行是全部内容：下拉吃掉剩余宽度，历史请求与功能菜单贴右。
-          宽屏只有下拉，历史请求按钮与功能菜单都隐藏（分别回到左栏列表和下方按钮排）。 */}
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
+      {/* 这一行承担全部宽度分配，宽度不够时靠 flex-wrap 把功能按钮排挤到下一行：
+          - 下拉 flex-[3] / 历史请求 flex-1：剩余宽度按 3:1 分，不再让下拉独占
+            （900px 时约 500 : 168，此前是 769 : 118）
+          - 下拉 min-w-[180px] 是换行阈值：宽屏左栏只有 ~282px，
+            下拉 + 功能排放不进去 → 功能排自动换到下一行，还原成宽屏的两行布局
+          - 历史请求 min-w 96 / max-w 280：极窄时收住，宽时也不会膨胀成空按钮 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[180px] flex-[3]">
           <Select
             label="选择转发地址"
             value={currentId}
@@ -61,55 +65,59 @@ export const TargetHub = ({
             }))}
           />
         </div>
-        <RecordPicker className="max-panel:inline-flex panel:hidden" />
+
+        {/* 只在堆叠布局（<960）出现：宽屏历史列表常驻在左栏。 */}
+        <RecordPicker className="panel:hidden max-w-[280px] flex-1" />
+
+        {/* ≥700px：功能按钮平铺（跟下拉同一行，或换行到下方）。 */}
+        <div className="hidden shrink-0 items-center gap-1.5 hub:flex">
+          <Tooltip label="新增转发地址">
+            <IconButton label="新增转发地址" onClick={onCreate} tone="accent">
+              <Plus />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label="编辑当前转发地址">
+            <IconButton label="编辑当前转发地址" onClick={onEdit} disabled={!currentId}>
+              <Pencil />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label="删除当前转发地址">
+            <IconButton
+              label="删除当前转发地址"
+              onClick={onDelete}
+              disabled={!currentId}
+              tone="danger"
+            >
+              <Trash2 />
+            </IconButton>
+          </Tooltip>
+
+          <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
+
+          <Tooltip label="拦截规则（Mock / 故障注入）">
+            <IconButton label="拦截规则" onClick={onRules}>
+              <ShieldCheck />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label={showSensitive ? "当前：明文显示敏感信息" : "当前：敏感信息已脱敏"}>
+            <IconButton
+              label={showSensitive ? "隐藏敏感信息" : "显示敏感信息"}
+              onClick={toggleSensitive}
+              tone={showSensitive ? "accent" : "default"}
+            >
+              {showSensitive ? <EyeOff /> : <Eye />}
+            </IconButton>
+          </Tooltip>
+        </div>
+
+        {/* <700px：折成一个「更多」按钮，点开浮出同一组功能。 */}
         <TargetActions
-          className="max-panel:inline-flex panel:hidden"
+          className="panel:hidden hub:hidden"
           onCreate={onCreate}
           onEdit={onEdit}
           onDelete={onDelete}
           onRules={onRules}
         />
-      </div>
-
-      {/* 宽屏平铺按钮排；窄屏改由上面的折叠浮层承载，这里整行隐藏。 */}
-      <div className="flex flex-wrap items-center gap-1.5 max-panel:hidden">
-        <Tooltip label="新增转发地址">
-          <IconButton label="新增转发地址" onClick={onCreate} tone="accent">
-            <Plus />
-          </IconButton>
-        </Tooltip>
-        <Tooltip label="编辑当前转发地址">
-          <IconButton label="编辑当前转发地址" onClick={onEdit} disabled={!currentId}>
-            <Pencil />
-          </IconButton>
-        </Tooltip>
-        <Tooltip label="删除当前转发地址">
-          <IconButton
-            label="删除当前转发地址"
-            onClick={onDelete}
-            disabled={!currentId}
-            tone="danger"
-          >
-            <Trash2 />
-          </IconButton>
-        </Tooltip>
-
-        <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
-
-        <Tooltip label="拦截规则（Mock / 故障注入）">
-          <IconButton label="拦截规则" onClick={onRules}>
-            <ShieldCheck />
-          </IconButton>
-        </Tooltip>
-        <Tooltip label={showSensitive ? "当前：明文显示敏感信息" : "当前：敏感信息已脱敏"}>
-          <IconButton
-            label={showSensitive ? "隐藏敏感信息" : "显示敏感信息"}
-            onClick={toggleSensitive}
-            tone={showSensitive ? "accent" : "default"}
-          >
-            {showSensitive ? <EyeOff /> : <Eye />}
-          </IconButton>
-        </Tooltip>
       </div>
     </section>
   );

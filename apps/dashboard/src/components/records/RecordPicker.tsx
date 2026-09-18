@@ -22,8 +22,8 @@ export const RecordPicker = ({ className }: { className?: string }) => {
 
   return (
     <>
-      {/* 只给最小宽度：宽度由「历史请求 + 条数」自然撑开，空间紧张时才压缩并截断，
-          不写死成固定值，也不再和下拉抢固定份额。 */}
+      {/* 宽度由父行按 3:1 分配（flex-1 + max-w-[280px]），只设下限 min-w-[96px]：
+          空间足时变宽并显示当前选中的请求，空间紧时收到底宽、截断文字。 */}
       <Button
         size="sm"
         variant="secondary"
@@ -33,9 +33,15 @@ export const RecordPicker = ({ className }: { className?: string }) => {
         title={selected ? `当前：${selected.method} ${selected.path}` : "选择一条历史请求"}
       >
         <History className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate">
-          历史请求
-          <span className="ml-1 font-mono text-fg-dim">{records.length}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">历史请求</span>
+          <span className="shrink-0 font-mono text-fg-dim">{records.length}</span>
+          {/* 只有够宽（≥700）才补上当前选中的请求，否则按钮是空的宽块。 */}
+          {selected ? (
+            <span className="hidden min-w-0 truncate text-fg-dim hub:inline">
+              {selected.method} {selected.path}
+            </span>
+          ) : null}
         </span>
       </Button>
 
