@@ -103,8 +103,10 @@ const App = () => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [detailFocused, setDetailFocused]);
 
+  // 只跟随 selectedRecordId：删掉当前选中的那条后它是 null，详情区就该空着。
+  // 此前 fallback 到 records[0]，导致「删了这条却跑出下一条」。
   const selectedRecord = useMemo(
-    () => records.find((record) => record.id === selectedRecordId) ?? records[0] ?? null,
+    () => records.find((record) => record.id === selectedRecordId) ?? null,
     [records, selectedRecordId],
   );
 

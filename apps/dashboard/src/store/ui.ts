@@ -80,7 +80,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       sortMode: "time_desc",
     }),
 
-  activeTab: "response-body",
+  // 默认落在「概览」：选中一条请求时先看全貌，再按需切到 Body / Headers。
+  activeTab: "overview",
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   showSensitive: false,

@@ -1,8 +1,8 @@
-import { useMemo } from "react";
-import { Copy, Maximize2, Minimize2, Play } from "lucide-react";
+import { useEffect, useMemo } from "react";
+import { Copy, Maximize2, Minimize2, MousePointerClick, Play } from "lucide-react";
 import type { ProxyTrafficRecord } from "@proxira/core";
 import { parseBody, redactBodyView, resolveContentType } from "../../lib/body";
-import { buildCurlCommand, formatDuration, formatTime, resolveStatusTone } from "../../lib/format";
+import { buildCurlCommand } from "../../lib/format";
 import { redactHeaders, redactText } from "../../lib/redact";
 import { useCopy } from "../../hooks/useCopy";
 import { useUiStore, type DetailTab } from "../../store/ui";
@@ -15,15 +15,7 @@ import { BodyViewer } from "./BodyViewer";
 import { HeadersView } from "./HeadersView";
 import { OverviewTab } from "./OverviewTab";
 
-const statusToneMap = {
-  success: "success",
-  redirect: "info",
-  client: "warning",
-  server: "danger",
-  error: "danger",
-  pending: "neutral",
-} as const;
-
+// 状态 / 耗时这类摘要统一交给「概览」展示，标题行只保留请求类型 + 地址。
 const TAB_LABELS: Record<DetailTab, string> = {
   overview: "概览",
   "response-body": "响应 Body",
@@ -90,6 +82,11 @@ export const DetailPanel = ({
     };
   }, [record, showSensitive]);
 
+  // 选中另一条请求时回到「概览」，避免上一条停在 Body / Headers 造成误解。
+  useEffect(() => {
+    setActiveTab("overview");
+  }, [record?.id, setActiveTab]);
+
   if (!record || !views) {
     return (
       <section
@@ -98,14 +95,24 @@ export const DetailPanel = ({
         )}
       >
         <EmptyState
+          icon={<MousePointerClick />}
           title="还没有选中请求"
-          hint="左侧历史请求里点一条，这里会展示解析后的响应与请求细节。"
+          hint={
+            <>
+              {/* 窄屏历史列表是弹窗，提示语要跟着变，否则用户找不到入口。 */}
+              <span className="panel:hidden">
+                点顶部「历史请求」按钮，在弹窗里挑一条即可查看详情。
+              </span>
+              <span className="hidden panel:inline">
+                在左侧历史请求里点一条，这里会展示它的完整请求与响应。
+              </span>
+            </>
+          }
         />
       </section>
     );
   }
 
-  const tone = statusToneMap[resolveStatusTone(record.responseStatus, record.error)];
   const countOf = (tab: DetailTab): number | null => {
     if (tab === "response-headers") return Object.keys(views.responseHeaders).length;
     if (tab === "request-headers") return Object.keys(views.requestHeaders).length;
@@ -162,14 +169,8 @@ export const DetailPanel = ({
             </Tooltip>
           </div>
         </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Pill tone={tone}>状态 {record.responseStatus ?? "ERR"}</Pill>
-          <Pill tone="neutral">耗时 {formatDuration(record.durationMs)}</Pill>
-          <Pill tone="neutral">{formatTime(record.timestamp)}</Pill>
-          {record.source === "replay" ? <Pill tone="accent">重放</Pill> : null}
-          {record.appliedRuleId ? <Pill tone="warning">规则</Pill> : null}
-        </div>
+        {/* 状态 / 耗时 / 时间这组已移到「概览」里集中展示，
+            标题行只留请求类型 + 地址，切记录时这一行不再变高变矮。 */}
       </header>
 
       <nav

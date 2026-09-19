@@ -33,30 +33,29 @@ export const TargetHub = ({
         // 同上：高度固定、不伸缩，否则纵向布局里会被拉伸。
         "px-panel flex min-w-0 shrink-0 grow-0 basis-auto flex-col gap-2.5 border-b border-line px-3 py-2.5",
         "panel:w-full",
-        // 双栏下与右侧「详情标题栏(88) + 分区 tab 栏(45)」等高，两条分隔线对齐。
+        // 双栏下与右侧「详情标题栏(57) + 分区 tab 栏(45)」等高，两条分隔线对齐。
         // 只设 min-h：内容真变高时照常增高，不会被裁。
-        "panel:min-h-[133px]",
+        "panel:min-h-[102px]",
       )}
     >
-      {/* 标题字号与「历史请求」等面板标题一致（font-display 15px semibold）。
-          窄屏整行隐藏：标题、超时都由浮层/下拉自解释，把高度让给内容。 */}
-      <div className="flex items-center justify-between gap-2 max-panel:hidden">
-        <h2 className="font-display text-[15px] font-semibold">转发地址</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        {/* 标题与下拉同一行：原来标题单独占一行，左列比右列多出 28px 对不齐。
+            超时改成短格式（30s 而不是 30000 ms），否则这一行塞不下会把下拉挤走。
+            窄屏两者都隐藏，下拉独占整行。 */}
+        <h2 className="shrink-0 font-display text-[15px] font-semibold max-panel:hidden">
+          转发地址
+        </h2>
         {activeTarget?.upstreamTimeoutMs ? (
-          <span className="font-mono text-[11px] text-fg-dim">
-            超时 {activeTarget.upstreamTimeoutMs} ms
+          <span
+            className="shrink-0 font-mono text-[11px] text-fg-dim max-panel:hidden"
+            title={`上游超时 ${activeTarget.upstreamTimeoutMs} ms`}
+          >
+            {activeTarget.upstreamTimeoutMs >= 1000
+              ? `${activeTarget.upstreamTimeoutMs / 1000}s`
+              : `${activeTarget.upstreamTimeoutMs}ms`}
           </span>
         ) : null}
-      </div>
 
-      {/* 这一行承担全部宽度分配，宽度不够时靠 flex-wrap 把功能按钮排挤到下一行：
-          - 下拉 flex-[3] / 历史请求 flex-1：剩余宽度按 3:1 分，不再让下拉独占
-            （900px 时约 500 : 168，此前是 769 : 118）
-          - 下拉 min-w-[160px] 是换行阈值：宽屏左栏只有 ~282px，
-            下拉 + 功能排放不进去 → 功能排自动换到下一行，还原成宽屏的两行布局；
-            同时它要保证 360px 下「下拉 + 历史请求 + 折叠按钮」仍能挤在一行
-          - 历史请求 min-w-fit / max-w 280：下限跟着文字走，上限不让它膨胀成空按钮 */}
-      <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-[160px] flex-[3]">
           <Select
             label="选择转发地址"
