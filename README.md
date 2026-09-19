@@ -25,7 +25,7 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 - 透明代理转发：保留 Method / Path / Query / Headers / Body。
 - 实时观测：SSE 推送请求事件，面板实时更新；支持状态筛选、方法筛选、耗时排序、时间排序。
 - 多转发地址管理：每个转发地址独立的上游地址与历史记录。
-- 多格式正文查看：JSON / XML / YAML / HTML / CSV / Markdown / Text；JSON 可逐层折叠，SSE 响应按帧折叠。
+- 多格式正文查看：JSON / XML / YAML / HTML / CSV / Markdown / Text；JSON 树带行号、可逐层折叠，SSE 响应按帧折叠；正文内查找用浏览器自带的 ⌘F / Ctrl+F。
 - 拦截规则：按路径 / 方法匹配后执行 Mock、模拟错误、延迟、流式中断、响应截断。
 - 请求重放与差异对比：改完参数直接重发上游，并与原响应做逐行差异对比。
 - 敏感信息脱敏：`authorization` / `cookie` / `api_key` 等默认打码，可一键切换原文。
@@ -139,7 +139,7 @@ pnpm run release            # 发版并发布到 npm（注意要带 run）
 npx proxira@latest
 
 # 固定版本使用（便于团队复现）
-npx proxira@0.3.1
+npx proxira@0.3.2
 
 # 全局安装
 npm i -g proxira
