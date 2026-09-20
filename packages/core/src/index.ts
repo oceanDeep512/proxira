@@ -164,6 +164,9 @@ export interface ProxyServerStatus {
   config: ProxyConfig;
   historySize: number;
   sseClients: number;
+  /** Absolute path to the on-disk data directory. Shown in Settings so the
+   *  user can locate/inspect it, and opened by the "open folder" action. */
+  dataDir: string;
 }
 
 export type ProxySseEvent =

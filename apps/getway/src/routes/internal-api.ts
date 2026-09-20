@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { spawnSync } from "node:child_process";
+import { platform } from "node:os";
 import { RuntimeStore } from "../app/runtime-store.js";
 import type { ProxyService } from "../proxy/service.js";
 import type { RuntimeConfig, RuntimeStatusFactory } from "../app/types.js";
+import { AppError } from "../shared/errors.js";
 
 type ValidationIssue = {
   path?: ReadonlyArray<PropertyKey> | undefined;
@@ -335,6 +338,30 @@ export const createInternalApiRouter = (deps: {
       return c.json(await deps.proxyService.replay(c.req.valid("json")));
     },
   );
+
+  // Open the on-disk data directory in the platform file manager. The path is
+  // fixed to config.dataDir on purpose — never echo back a caller-supplied
+  // path, or this becomes an arbitrary "open anything" endpoint.
+  router.post("/open-folder", (c) => {
+    const dir = deps.config.dataDir;
+    const isWin = platform() === "win32";
+    const cmd = isWin ? "explorer" : platform() === "darwin" ? "open" : "xdg-open";
+    try {
+      const result = spawnSync(cmd, [dir], { stdio: "ignore" });
+      if (result.error) {
+        throw result.error;
+      }
+      // explorer returns a non-zero exit code even on success, so on Windows
+      // the absence of an error is the only reliable success signal.
+      if (!isWin && result.status !== 0) {
+        throw new AppError(500, `${cmd} 退出码 ${result.status}`);
+      }
+      return c.json({ ok: true, dir });
+    } catch (error) {
+      const reason = error instanceof Error && error.message ? error.message : String(error);
+      throw new AppError(500, `无法打开文件夹：${reason}`);
+    }
+  });
 
   router.get("/events", (c) => {
     return deps.runtime.createEventsResponse(c.req.raw.signal);

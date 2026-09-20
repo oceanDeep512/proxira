@@ -5,8 +5,6 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  ShieldCheck,
-  Tags,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,23 +19,17 @@ import { cn } from "../../lib/cn";
  *
  * 宽屏仍是平铺的一排按钮（由 TargetHub 渲染），这里整体隐藏。
  *
- * 没有用 Radix DropdownMenu：浮层里放的是普通图标按钮而不是 menuitem，
- * 而且点「新增/删除」会再开一个 Dialog，DropdownMenu 的焦点回收会和 Dialog 抢焦点。
- * 这个浮层只做定位 + 外部点击/Esc 关闭，焦点交给浏览器自然顺序。
+ * 拦截规则 / 请求头已移入设置面板，这里只留转发地址的增删改与敏感信息开关。
  */
 export const TargetActions = ({
   onCreate,
   onEdit,
   onDelete,
-  onRules,
-  onHeaders,
   className,
 }: {
   onCreate: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onRules: () => void;
-  onHeaders: () => void;
   className?: string;
 }) => {
   const [open, setOpen] = useState(false);
@@ -129,12 +121,6 @@ export const TargetActions = ({
 
           <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
 
-          <IconButton label="拦截规则（Mock / 故障注入）" onClick={run(onRules)}>
-            <ShieldCheck />
-          </IconButton>
-          <IconButton label="请求头（固定头 / 改写规则）" onClick={run(onHeaders)}>
-            <Tags />
-          </IconButton>
           <IconButton
             label={showSensitive ? "隐藏敏感信息" : "显示敏感信息"}
             tone={showSensitive ? "accent" : "default"}

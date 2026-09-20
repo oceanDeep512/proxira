@@ -1,9 +1,7 @@
-import { Moon, RotateCcw, Sun } from "lucide-react";
+import { Settings } from "lucide-react";
 import { useProxiraStore } from "../../store/proxira";
-import { useUiStore } from "../../store/ui";
-import { Button } from "../ui/Button";
-import { IconButton } from "../ui/IconButton";
 import { Pill } from "../ui/Pill";
+import { IconButton } from "../ui/IconButton";
 import { Tooltip } from "../ui/Tooltip";
 import { cn } from "../../lib/cn";
 
@@ -14,19 +12,15 @@ const connectionMeta = {
 };
 
 export const TopBar = ({
-  onReset,
-  resetting,
+  onOpenSettings,
   className,
 }: {
-  onReset: () => void;
-  resetting: boolean;
-  /** 窄屏专注模式下由 App 传 max-panel:hidden 整条隐藏。 */
+  /** 打开设置面板。主题切换与重置已收入设置通用标签。 */
+  onOpenSettings: () => void;
   className?: string;
 }) => {
   const connectionState = useProxiraStore((state) => state.connectionState);
   const connectSse = useProxiraStore((state) => state.connectSse);
-  const theme = useUiStore((state) => state.theme);
-  const toggleTheme = useUiStore((state) => state.toggleTheme);
 
   const meta = connectionMeta[connectionState];
 
@@ -78,23 +72,11 @@ export const TopBar = ({
           {meta.label}
         </Pill>
 
-        <div className="flex items-center gap-1.5">
-          <Tooltip label={theme === "dark" ? "切换到浅色" : "切换到深色"}>
-            <IconButton
-              label={theme === "dark" ? "切换到浅色" : "切换到深色"}
-              onClick={toggleTheme}
-            >
-              {theme === "dark" ? <Sun /> : <Moon />}
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip label="清空全部转发地址与历史记录">
-            <Button variant="danger" size="sm" onClick={onReset} disabled={resetting}>
-              <RotateCcw className="size-3.5" />
-              {resetting ? "重置中" : "重置"}
-            </Button>
-          </Tooltip>
-        </div>
+        <Tooltip label="设置">
+          <IconButton label="设置" onClick={onOpenSettings}>
+            <Settings className="size-4" />
+          </IconButton>
+        </Tooltip>
       </div>
     </header>
   );

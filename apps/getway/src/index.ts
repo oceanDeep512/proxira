@@ -297,6 +297,7 @@ const bootstrap = async (): Promise<void> => {
         config: snapshot.config,
         historySize: snapshot.historySize,
         sseClients: snapshot.sseClients,
+        dataDir: config.dataDir,
       };
     },
     logger: console,

@@ -18,6 +18,7 @@ import { TargetFormModal, type TargetFormValue } from "./components/modals/Targe
 import { RuleManagerModal } from "./components/modals/RuleManagerModal";
 import { RequestHeadersModal } from "./components/modals/RequestHeadersModal";
 import { ReplayDialog } from "./components/modals/ReplayDialog";
+import { SettingsModal } from "./components/modals/SettingsModal";
 import { Toaster } from "./components/ui/Toaster";
 import { TooltipProvider } from "./components/ui/Tooltip";
 
@@ -73,6 +74,9 @@ const App = () => {
   const [headersModalOpen, setHeadersModalOpen] = useState(false);
   const [replayModalOpen, setReplayModalOpen] = useState(false);
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
+
+  const settingsOpen = useProxiraStore((state) => state.settingsOpen);
+  const setSettingsOpen = useProxiraStore((state) => state.setSettingsOpen);
 
   useEffect(() => {
     if (bootstrapped) return;
@@ -177,8 +181,7 @@ const App = () => {
         {/* 专注模式只在窄屏生效：用 max-panel 限定，拉宽窗口会自动恢复，
             不会出现「宽屏下顶栏不见了」的死角。 */}
         <TopBar
-          onReset={() => setResetModalOpen(true)}
-          resetting={resettingAll}
+          onOpenSettings={() => setSettingsOpen(true)}
           className={cn(detailFocused && "max-panel:hidden")}
         />
 
@@ -204,8 +207,6 @@ const App = () => {
               onCreate={() => setTargetModal({ mode: "create" })}
               onEdit={() => setTargetModal({ mode: "edit" })}
               onDelete={() => setDeleteModalOpen(true)}
-              onRules={openRulesModal}
-              onHeaders={() => setHeadersModalOpen(true)}
             />
             {/* 窄屏整块隐藏（改走对话框选择器），宽屏仍是常驻侧栏。
                 用 CSS 隐藏而不是卸载，切换尺寸时筛选条件不会丢。 */}
@@ -291,6 +292,20 @@ const App = () => {
         result={replayResult}
         onOpenChangeResult={setReplayResult}
         onSubmit={submitReplay}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onOpenHeaders={() => {
+          setSettingsOpen(false);
+          setHeadersModalOpen(true);
+        }}
+        onOpenRules={() => {
+          setSettingsOpen(false);
+          openRulesModal();
+        }}
+        onRequestReset={() => setResetModalOpen(true)}
       />
 
       <Toaster />

@@ -6,6 +6,7 @@ import type {
   ProxyHeaderRule,
   ProxyRecordsResponse,
   ProxyRule,
+  ProxyServerStatus,
   ProxySseEvent,
   ProxyTrafficRecord,
 } from "@proxira/core";
@@ -52,6 +53,11 @@ type ProxiraState = {
   deleteTargetSubmitting: boolean;
   replaying: boolean;
   initialized: boolean;
+  /** 服务端状态（/status），目前只为设置面板提供 dataDir。 */
+  serverStatus: ProxyServerStatus | null;
+  fetchingStatus: boolean;
+  /** 设置面板是否打开。 */
+  settingsOpen: boolean;
 
   bootstrap: () => Promise<void>;
   connectSse: () => void;
@@ -96,6 +102,10 @@ type ProxiraState = {
     body?: string;
     useCustomHeaders?: boolean;
   }) => Promise<ReplayResult | null>;
+
+  fetchServerStatus: () => Promise<void>;
+  openDataFolder: () => Promise<void>;
+  setSettingsOpen: (open: boolean) => void;
 };
 
 // 当前生效的转发地址：没显式选中就回落到第一个。
@@ -288,6 +298,9 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
     deleteTargetSubmitting: false,
     replaying: false,
     initialized: false,
+    serverStatus: null,
+    fetchingStatus: false,
+    settingsOpen: false,
 
     bootstrap: async () => {
       try {
@@ -671,5 +684,32 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
         set({ replaying: false });
       }
     },
+
+    fetchServerStatus: async () => {
+      set({ fetchingStatus: true });
+      try {
+        const response = await apiFetch("/_proxira/api/status");
+        if (!response.ok) throw new Error("获取服务状态失败");
+        set({ serverStatus: (await response.json()) as ProxyServerStatus });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "获取服务状态失败");
+      } finally {
+        set({ fetchingStatus: false });
+      }
+    },
+
+    openDataFolder: async () => {
+      try {
+        const response = await apiFetch("/_proxira/api/open-folder", { method: "POST" });
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "无法打开文件夹"));
+        }
+        toast.success("已在系统文件管理器中打开数据目录");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "无法打开文件夹");
+      }
+    },
+
+    setSettingsOpen: (open) => set({ settingsOpen: open }),
   };
 });

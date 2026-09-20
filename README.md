@@ -30,6 +30,7 @@ Proxira 是一个面向本地开发联调的代理与观测工具。你可以把
 - 多格式正文查看：JSON / XML / YAML / HTML / CSV / Markdown / Text；JSON 树带行号、可逐层折叠，SSE 响应按帧折叠；正文内查找用浏览器自带的 ⌘F / Ctrl+F。
 - 拦截规则：按路径 / 方法匹配后执行 Mock、模拟错误、延迟、流式中断、响应截断。
 - 自定义请求头：每个转发地址可配置固定请求头（支持多条），并按请求头名称前缀匹配替换或忽略，命中可覆盖多个头。
+- 设置面板：顶栏齿轮集中管理——数据存储文件夹（含一键在文件管理器中打开）、主题切换、清空所有数据；请求头与拦截规则的入口也在这里。
 - 请求重放与差异对比：改完参数直接重发上游，并与原响应做逐行差异对比。
 - 敏感信息脱敏：`authorization` / `cookie` / `api_key` 等默认打码，可一键切换原文。
 - 数据导出与复制：历史记录导出 JSON；详情一键复制 URL、Headers、Body、cURL。
@@ -410,7 +411,7 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/_proxira/api/health` | 健康检查 |
-| `GET` | `/_proxira/api/status` | 服务状态 |
+| `GET` | `/_proxira/api/status` | 服务状态（含 `dataDir` 数据目录） |
 | `GET` | `/_proxira/api/config` | 读取当前配置 |
 | `PUT` | `/_proxira/api/config` | 切换激活转发地址 |
 | `POST` | `/_proxira/api/groups` | 创建转发地址（可带请求头配置） |
@@ -427,6 +428,7 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 | `POST` | `/_proxira/api/replay` | 重放一次请求（不经过规则引擎；`useCustomHeaders: true` 才套用请求头配置） |
 | `GET` | `/_proxira/api/events` | SSE 事件流 |
 | `POST` | `/_proxira/api/reset` | 重置数据 |
+| `POST` | `/_proxira/api/open-folder` | 在系统文件管理器中打开数据目录 |
 
 ## 拦截规则（Mock / 故障注入）
 
@@ -440,11 +442,11 @@ tar -tzf proxira-*.tgz | grep -v -E '^package/(dist|dashboard-dist)/'
 | `break_stream` | 流式响应在第 N 个分片后断开 | 复现 SSE/LLM 流式中断 |
 | `truncate` | 只保留响应前 N 字节后断开 | 复现响应被截断、JSON 解析失败 |
 
-在面板工具栏点「拦截规则」即可增删改与启停；停用后立刻恢复真实转发。命中的记录会在列表里带「规则」标记，详情里也能看到命中的规则 id。
+在设置面板的「Mock 拦截」标签点「打开拦截规则」即可增删改与启停；停用后立刻恢复真实转发。命中的记录会在列表里带「规则」标记，详情里也能看到命中的规则 id。
 
 ## 自定义请求头（固定头 / 改写规则）
 
-配置挂在**转发地址**上，切到别的地址就换一套，只作用于该地址的出站请求。面板工具栏点「请求头」进入。
+配置挂在**转发地址**上，切到别的地址就换一套，只作用于该地址的出站请求。设置面板的「请求头」标签点「打开请求头配置」进入。
 
 **固定请求头**：每个出站请求都会带上，同名时覆盖客户端原值，可以加多条（例如给上游换一套鉴权头、或补一个必须存在的租户标识）。
 
