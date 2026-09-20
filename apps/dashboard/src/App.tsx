@@ -182,6 +182,10 @@ const App = () => {
           className={cn(detailFocused && "max-panel:hidden")}
         />
 
+        {/* 新请求提示：独占一行夹在顶栏和面板之间，不压在面板上。
+            没有新请求时行高收成 0，面板紧贴顶栏。 */}
+        <NewRecordNotice />
+
         {/* 窄屏纵向堆叠、宽屏左右分栏；这一层负责分配除顶栏外的全部高度。 */}
         <div className="flex min-h-0 flex-1 flex-col panel:flex-row panel:flex-nowrap">
           <div
@@ -288,9 +292,6 @@ const App = () => {
         onOpenChangeResult={setReplayResult}
         onSubmit={submitReplay}
       />
-
-      {/* 新请求提示：固定在视口底部居中，不占布局高度，也不会和右下角的 toast 抢位置。 */}
-      <NewRecordNotice />
 
       <Toaster />
     </TooltipProvider>

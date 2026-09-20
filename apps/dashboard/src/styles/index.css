@@ -682,6 +682,18 @@
   }
 }
 
+/* 顶部吸附的浮层（如新请求提示）用这个：从上方落下，方向感和位置一致。 */
+@keyframes px-fade-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes px-pop {
   from {
     opacity: 0;
