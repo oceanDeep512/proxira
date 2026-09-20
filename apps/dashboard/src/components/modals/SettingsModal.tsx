@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { FolderOpen, Moon, Settings as SettingsIcon, Sun, Tags, X, Zap } from "lucide-react";
-import { useProxiraStore } from "../../store/proxira";
+import { selectActiveTarget, useProxiraStore } from "../../store/proxira";
 import { useUiStore } from "../../store/ui";
 import { Button } from "../ui/Button";
 import { Toggle } from "../ui/Toggle";
+import { HeaderRulesEditor } from "../settings/HeaderRulesEditor";
 import { cn } from "../../lib/cn";
 
 type Tab = "general" | "headers" | "mock";
 
 const TABS: { id: Tab; label: string; icon: typeof SettingsIcon; hint: string }[] = [
   { id: "general", label: "通用", icon: SettingsIcon, hint: "数据目录 · 主题 · 重置" },
-  { id: "headers", label: "请求头", icon: Tags, hint: "预设分组（即将升级）" },
-  { id: "mock", label: "Mock 拦截", icon: Zap, hint: "规则分组（即将升级）" },
+  { id: "headers", label: "请求头", icon: Tags, hint: "固定头 · 匹配规则" },
+  { id: "mock", label: "Mock 拦截", icon: Zap, hint: "拦截规则（即将升级）" },
 ];
 
 /**
@@ -27,14 +28,11 @@ const TABS: { id: Tab; label: string; icon: typeof SettingsIcon; hint: string }[
 export const SettingsModal = ({
   open,
   onOpenChange,
-  onOpenHeaders,
   onOpenRules,
   onRequestReset,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 过渡：打开原有请求头弹窗。 */
-  onOpenHeaders: () => void;
   /** 过渡：打开原有拦截规则弹窗。 */
   onOpenRules: () => void;
   /** 触发重置确认流程（由 App 持有 ConfirmDialog）。 */
@@ -42,6 +40,7 @@ export const SettingsModal = ({
 }) => {
   const [tab, setTab] = useState<Tab>("general");
 
+  const activeTarget = useProxiraStore(selectActiveTarget);
   const serverStatus = useProxiraStore((state) => state.serverStatus);
   const fetchingStatus = useProxiraStore((state) => state.fetchingStatus);
   const fetchServerStatus = useProxiraStore((state) => state.fetchServerStatus);
@@ -72,11 +71,14 @@ export const SettingsModal = ({
         />
         <DialogPrimitive.Content
           className={cn(
-            "fixed left-1/2 top-1/2 z-[1210] flex max-h-[calc(100dvh-32px)] w-[calc(100vw-24px)]",
+            // 固定高度：切标签时对话框不再忽高忽矮，多出来的内容在右栏里滚。
+            // 宽度 860 是给请求头编辑器留的：原独立弹窗是 960，收到 760 时
+            // 「前缀 + 动作 + 值 + 删除」那一行会换行。
+            "fixed left-1/2 top-1/2 z-[1210] flex h-[min(620px,calc(100dvh-48px))] w-[calc(100vw-24px)]",
             "-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
             "rounded-lg border border-line bg-surface shadow-[var(--px-shadow-pop)]",
             "data-[state=open]:animate-[px-pop_180ms_cubic-bezier(0.22,1,0.36,1)]",
-            "max-w-[760px]",
+            "max-w-[860px]",
           )}
         >
           <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
@@ -100,9 +102,11 @@ export const SettingsModal = ({
             </DialogPrimitive.Close>
           </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)]">
-            {/* 左侧标签导航 */}
-            <nav className="flex flex-col gap-1 border-r border-line bg-surface-2 p-2">
+          {/* 宽屏：左侧竖排标签（带副标题）；窄屏：顶部横排，只留图标 + 名称。
+              窄屏若仍占 160px 左栏，右侧编辑器会被挤扁。 */}
+          <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] panel:grid-cols-[168px_minmax(0,1fr)] panel:grid-rows-1">
+            {/* 标签导航 */}
+            <nav className="flex items-center gap-1 overflow-x-auto border-b border-line bg-surface-2 p-2 panel:flex-col panel:items-stretch panel:overflow-x-visible panel:border-b-0 panel:border-r">
               {TABS.map((item) => {
                 const Icon = item.icon;
                 const activeTab = tab === item.id;
@@ -113,17 +117,20 @@ export const SettingsModal = ({
                     onClick={() => setTab(item.id)}
                     aria-current={activeTab}
                     className={cn(
-                      "flex flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors",
+                      "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left transition-colors",
+                      "panel:flex-col panel:items-start panel:gap-0.5",
                       activeTab
                         ? "bg-surface text-fg shadow-[var(--px-shadow-soft)]"
                         : "text-fg-soft hover:bg-surface hover:text-fg",
                     )}
                   >
-                    <span className="flex items-center gap-2 text-[13px] font-medium">
+                    <span className="flex items-center gap-2 text-[13px] font-medium whitespace-nowrap">
                       <Icon className="size-3.5" />
                       {item.label}
                     </span>
-                    <span className="text-[11px] leading-tight text-fg-dim">{item.hint}</span>
+                    <span className="hidden text-[11px] leading-tight text-fg-dim panel:block">
+                      {item.hint}
+                    </span>
                   </button>
                 );
               })}
@@ -190,19 +197,12 @@ export const SettingsModal = ({
               ) : null}
 
               {tab === "headers" ? (
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <h3 className="m-0 font-display text-[14px] font-semibold text-fg">请求头</h3>
-                    <p className="m-0 mt-1 text-[12px] leading-relaxed text-fg-soft">
-                      当前为<strong className="font-medium">转发地址级</strong>配置：固定头 + 按名称前缀匹配的改写规则。
-                      后续将升级为可复用的<strong className="font-medium">预设分组</strong>，一个转发地址可叠加多个预设。
-                    </p>
-                  </div>
-                  <Button variant="secondary" onClick={onOpenHeaders} className="w-fit">
-                    <Tags className="size-4" />
-                    打开请求头配置
-                  </Button>
-                </div>
+                <HeaderRulesEditor
+                  targetId={activeTarget?.id ?? ""}
+                  targetName={activeTarget?.name ?? ""}
+                  customHeaders={activeTarget?.customHeaders ?? []}
+                  headerRules={activeTarget?.headerRules ?? []}
+                />
               ) : null}
 
               {tab === "mock" ? (

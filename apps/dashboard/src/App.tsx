@@ -16,7 +16,6 @@ import { DetailPanel } from "./components/detail/DetailPanel";
 import { ConfirmDialog } from "./components/modals/ConfirmDialog";
 import { TargetFormModal, type TargetFormValue } from "./components/modals/TargetFormModal";
 import { RuleManagerModal } from "./components/modals/RuleManagerModal";
-import { RequestHeadersModal } from "./components/modals/RequestHeadersModal";
 import { ReplayDialog } from "./components/modals/ReplayDialog";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { Toaster } from "./components/ui/Toaster";
@@ -60,7 +59,6 @@ const App = () => {
   const toggleRule = useProxiraStore((state) => state.toggleRule);
   const fetchRules = useProxiraStore((state) => state.fetchRules);
   const replayRecord = useProxiraStore((state) => state.replayRecord);
-  const saveTargetHeaders = useProxiraStore((state) => state.saveTargetHeaders);
 
   const setListPanelOpen = useUiStore((state) => state.setListPanelOpen);
   const showSensitive = useUiStore((state) => state.showSensitive);
@@ -71,7 +69,6 @@ const App = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
-  const [headersModalOpen, setHeadersModalOpen] = useState(false);
   const [replayModalOpen, setReplayModalOpen] = useState(false);
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
 
@@ -273,16 +270,6 @@ const App = () => {
         onToggle={(rule) => void toggleRule(rule)}
       />
 
-      <RequestHeadersModal
-        open={headersModalOpen}
-        onOpenChange={setHeadersModalOpen}
-        targetId={activeTarget?.id ?? ""}
-        targetName={activeTarget?.name ?? ""}
-        customHeaders={activeTarget?.customHeaders ?? []}
-        headerRules={activeTarget?.headerRules ?? []}
-        onSubmit={saveTargetHeaders}
-      />
-
       <ReplayDialog
         open={replayModalOpen}
         onOpenChange={setReplayModalOpen}
@@ -297,10 +284,6 @@ const App = () => {
       <SettingsModal
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        onOpenHeaders={() => {
-          setSettingsOpen(false);
-          setHeadersModalOpen(true);
-        }}
         onOpenRules={() => {
           setSettingsOpen(false);
           openRulesModal();
