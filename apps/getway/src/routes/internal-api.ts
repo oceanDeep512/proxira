@@ -55,11 +55,34 @@ const configUpdateSchema = z
     { message: "activeGroupId or targetBaseUrl is required." },
   );
 
+// Header names / prefixes and protected-name rejection are enforced in
+// headers/utils so hydration and the API share one rule set; here we only
+// describe the shape.
+const headerEntrySchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string(),
+  value: z.string(),
+});
+
+const headerRuleSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  enabled: z.boolean().optional(),
+  namePrefix: z.string(),
+  action: z.enum(["set", "ignore"]),
+  value: z.string().optional(),
+});
+
+const headerConfigSchema = {
+  customHeaders: z.array(headerEntrySchema).max(100).optional(),
+  headerRules: z.array(headerRuleSchema).max(100).optional(),
+};
+
 const createGroupSchema = z.object({
   name: z.string().trim().min(1),
   targetBaseUrl: z.string().trim().min(1),
   switchToNew: z.boolean().optional(),
   upstreamTimeoutMs: z.number().int().positive().nullable().optional(),
+  ...headerConfigSchema,
 });
 
 const updateGroupSchema = z
@@ -68,14 +91,20 @@ const updateGroupSchema = z
     targetBaseUrl: z.string().optional(),
     makeActive: z.boolean().optional(),
     upstreamTimeoutMs: z.number().int().positive().nullable().optional(),
+    ...headerConfigSchema,
   })
   .refine(
     (value) =>
       typeof value.name === "string" ||
       typeof value.targetBaseUrl === "string" ||
       typeof value.makeActive === "boolean" ||
-      value.upstreamTimeoutMs !== undefined,
-    { message: "name, targetBaseUrl, makeActive or upstreamTimeoutMs is required." },
+      value.upstreamTimeoutMs !== undefined ||
+      value.customHeaders !== undefined ||
+      value.headerRules !== undefined,
+    {
+      message:
+        "name, targetBaseUrl, makeActive, upstreamTimeoutMs or headers is required.",
+    },
   );
 
 const recordsQuerySchema = z.object({
@@ -134,6 +163,7 @@ const replaySchema = z.object({
   url: z.string().trim().min(1).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.string().optional(),
+  useCustomHeaders: z.boolean().optional(),
 });
 
 export const createInternalApiRouter = (deps: {

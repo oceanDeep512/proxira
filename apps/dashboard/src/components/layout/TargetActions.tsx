@@ -6,6 +6,7 @@ import {
   Pencil,
   Plus,
   ShieldCheck,
+  Tags,
   Trash2,
   X,
 } from "lucide-react";
@@ -29,12 +30,14 @@ export const TargetActions = ({
   onEdit,
   onDelete,
   onRules,
+  onHeaders,
   className,
 }: {
   onCreate: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onRules: () => void;
+  onHeaders: () => void;
   className?: string;
 }) => {
   const [open, setOpen] = useState(false);
@@ -128,6 +131,9 @@ export const TargetActions = ({
 
           <IconButton label="拦截规则（Mock / 故障注入）" onClick={run(onRules)}>
             <ShieldCheck />
+          </IconButton>
+          <IconButton label="请求头（固定头 / 改写规则）" onClick={run(onHeaders)}>
+            <Tags />
           </IconButton>
           <IconButton
             label={showSensitive ? "隐藏敏感信息" : "显示敏感信息"}

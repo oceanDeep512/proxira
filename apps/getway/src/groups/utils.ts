@@ -1,4 +1,4 @@
-import type { ProxyGroup } from "@proxira/core";
+import type { ProxyGroup, ProxyHeaderEntry, ProxyHeaderRule } from "@proxira/core";
 
 export const normalizeTargetBaseUrl = (value: string): string | null => {
   try {
@@ -17,12 +17,18 @@ export const createGroup = (
   targetBaseUrl: string,
   randomUUID: () => string,
   upstreamTimeoutMs: number | null = null,
+  headers: {
+    customHeaders?: ProxyHeaderEntry[] | undefined;
+    headerRules?: ProxyHeaderRule[] | undefined;
+  } = {},
 ): ProxyGroup => {
   return {
     id: randomUUID(),
     name: name.trim(),
     targetBaseUrl,
     upstreamTimeoutMs: normalizeTimeout(upstreamTimeoutMs),
+    customHeaders: headers.customHeaders ?? [],
+    headerRules: headers.headerRules ?? [],
   };
 };
 

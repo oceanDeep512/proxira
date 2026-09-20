@@ -8,19 +8,20 @@ import type {
 } from "@proxira/core";
 import type { RuntimeDeps } from "../app/types.js";
 import { RuntimeStore } from "../app/runtime-store.js";
+import { applyHeaderRules } from "../headers/utils.js";
 import { AppError } from "../shared/errors.js";
 import {
   buildDownstreamHeaders,
   buildUpstreamUrl,
   collectBody,
   collectHeaders,
-    collectQuery,
-    describeUpgradeProtocol,
-    isBodilessStatus,
-    isStreamingContentType,
-    stripHeaders,
-    REQUEST_STRIP_HEADERS,
-  } from "../shared/http.js";
+  collectQuery,
+  describeUpgradeProtocol,
+  isBodilessStatus,
+  isStreamingContentType,
+  stripHeaders,
+  REQUEST_STRIP_HEADERS,
+} from "../shared/http.js";
 
 const isTimeoutError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") {
@@ -32,6 +33,22 @@ const isTimeoutError = (error: unknown): boolean => {
 // While a long stream is still running, surface the already-sampled bytes to
 // the dashboard at this interval instead of waiting for the stream to finish.
 const STREAM_SAMPLE_EMIT_INTERVAL_MS = 1_000;
+
+/**
+ * Builds the header set actually sent upstream for a target.
+ *
+ * The order is the contract: strip what the proxy owns, delete accept-encoding
+ * (uncompressed replies keep the dashboard readable), write the target's fixed
+ * headers, then run the rules — so a rule can rewrite or drop a fixed header as
+ * well. Protected names are stripped once more at the end, which is what keeps
+ * a saved rule from resurrecting host / content-length / accept-encoding.
+ */
+const buildUpstreamRequestHeaders = (incoming: Headers, group: ProxyGroup): Headers => {
+  const headers = stripHeaders(incoming, REQUEST_STRIP_HEADERS);
+  headers.delete("accept-encoding");
+  applyHeaderRules(headers, group.customHeaders, group.headerRules);
+  return headers;
+};
 
 const mergeChunks = (chunks: Uint8Array[], total: number): Uint8Array => {
   const merged = new Uint8Array(total);
@@ -208,8 +225,7 @@ export class ProxyService {
       });
     }
 
-    const upstreamRequestHeaders = stripHeaders(request.headers, REQUEST_STRIP_HEADERS);
-    upstreamRequestHeaders.delete("accept-encoding");
+    const upstreamRequestHeaders = buildUpstreamRequestHeaders(request.headers, activeGroup);
 
     // The timeout is meant to bound "waiting for the upstream to answer", not
     // "how long the answer may take to stream". An SSE / LLM stream can run for
@@ -539,6 +555,9 @@ export class ProxyService {
     url?: string | undefined;
     headers?: Record<string, string> | undefined;
     body?: string | undefined;
+    /** Opt-in: a replay reproduces the original request, so the target's
+     * fixed headers / rules are off unless the caller asks for them. */
+    useCustomHeaders?: boolean | undefined;
   }): Promise<{
     ok: boolean;
     status: number | null;
@@ -585,6 +604,17 @@ export class ProxyService {
     }
     upstreamRequestHeaders.delete("accept-encoding");
     upstreamRequestHeaders.delete("content-length");
+
+    // Replays default to "what the upstream really does with the original
+    // request"; turning this on re-applies the active target's fixed headers
+    // and rules, which is what you want when the auth scheme lives there.
+    if (payload.useCustomHeaders === true) {
+      applyHeaderRules(
+        upstreamRequestHeaders,
+        activeGroup.customHeaders,
+        activeGroup.headerRules,
+      );
+    }
 
     const encoder = new TextEncoder();
     const requestBytes = encoder.encode(body);

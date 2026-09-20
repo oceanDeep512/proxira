@@ -11,10 +11,12 @@ import { cn } from "./lib/cn";
 import { TopBar } from "./components/layout/TopBar";
 import { TargetHub } from "./components/layout/TargetHub";
 import { RecordList } from "./components/records/RecordList";
+import { NewRecordNotice } from "./components/records/NewRecordNotice";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ConfirmDialog } from "./components/modals/ConfirmDialog";
 import { TargetFormModal, type TargetFormValue } from "./components/modals/TargetFormModal";
 import { RuleManagerModal } from "./components/modals/RuleManagerModal";
+import { RequestHeadersModal } from "./components/modals/RequestHeadersModal";
 import { ReplayDialog } from "./components/modals/ReplayDialog";
 import { Toaster } from "./components/ui/Toaster";
 import { TooltipProvider } from "./components/ui/Tooltip";
@@ -57,6 +59,7 @@ const App = () => {
   const toggleRule = useProxiraStore((state) => state.toggleRule);
   const fetchRules = useProxiraStore((state) => state.fetchRules);
   const replayRecord = useProxiraStore((state) => state.replayRecord);
+  const saveTargetHeaders = useProxiraStore((state) => state.saveTargetHeaders);
 
   const setListPanelOpen = useUiStore((state) => state.setListPanelOpen);
   const showSensitive = useUiStore((state) => state.showSensitive);
@@ -67,6 +70,7 @@ const App = () => {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [headersModalOpen, setHeadersModalOpen] = useState(false);
   const [replayModalOpen, setReplayModalOpen] = useState(false);
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
 
@@ -151,12 +155,14 @@ const App = () => {
     url: string;
     headersText: string;
     body: string;
+    useCustomHeaders: boolean;
   }): Promise<void> => {
     const result = await replayRecord({
       method: payload.method,
       url: payload.url,
       headers: parseHeaderLines(payload.headersText),
       body: payload.body,
+      useCustomHeaders: payload.useCustomHeaders,
     });
     if (result) setReplayResult(result);
   };
@@ -195,6 +201,7 @@ const App = () => {
               onEdit={() => setTargetModal({ mode: "edit" })}
               onDelete={() => setDeleteModalOpen(true)}
               onRules={openRulesModal}
+              onHeaders={() => setHeadersModalOpen(true)}
             />
             {/* 窄屏整块隐藏（改走对话框选择器），宽屏仍是常驻侧栏。
                 用 CSS 隐藏而不是卸载，切换尺寸时筛选条件不会丢。 */}
@@ -261,6 +268,16 @@ const App = () => {
         onToggle={(rule) => void toggleRule(rule)}
       />
 
+      <RequestHeadersModal
+        open={headersModalOpen}
+        onOpenChange={setHeadersModalOpen}
+        targetId={activeTarget?.id ?? ""}
+        targetName={activeTarget?.name ?? ""}
+        customHeaders={activeTarget?.customHeaders ?? []}
+        headerRules={activeTarget?.headerRules ?? []}
+        onSubmit={saveTargetHeaders}
+      />
+
       <ReplayDialog
         open={replayModalOpen}
         onOpenChange={setReplayModalOpen}
@@ -271,6 +288,9 @@ const App = () => {
         onOpenChangeResult={setReplayResult}
         onSubmit={submitReplay}
       />
+
+      {/* 新请求提示：固定在视口底部居中，不占布局高度，也不会和右下角的 toast 抢位置。 */}
+      <NewRecordNotice />
 
       <Toaster />
     </TooltipProvider>

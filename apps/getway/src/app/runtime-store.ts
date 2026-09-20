@@ -22,6 +22,7 @@ import { readJsonFile, saveJsonFile } from "../shared/files.js";
 import { encodeFilenameRFC5987, toSafeAsciiToken } from "../shared/format.js";
 import { normalizeRecord, ensureUniqueRecordId, filterRecords } from "../history/utils.js";
 import { createGroup, normalizeGroupName, normalizeTargetBaseUrl, normalizeTimeout } from "../groups/utils.js";
+import { parseHeadersConfig } from "../headers/utils.js";
 import type { RuntimeConfig } from "./types.js";
 
 // Bodies are re-clipped before hitting disk: memory keeps the full capture
@@ -129,11 +130,21 @@ export class RuntimeStore {
           continue;
         }
 
+        // Header config is rebuilt from scratch on every hydration: entries
+        // that no longer make sense (renamed to a protected header, hand-edited
+        // into an invalid name) are dropped instead of failing startup.
+        const headers = parseHeadersConfig(
+          { customHeaders: group.customHeaders, headerRules: group.headerRules },
+          this.deps.randomUUID,
+        );
+
         hydratedGroups.push({
           id: groupId,
           name: normalizeGroupName(group.name ?? "", hydratedGroups.length + 1),
           targetBaseUrl: normalizedTarget,
           upstreamTimeoutMs: normalizeTimeout(group.upstreamTimeoutMs),
+          customHeaders: headers.customHeaders,
+          headerRules: headers.headerRules,
         });
         usedGroupIds.add(groupId);
         usedTargets.add(normalizedTarget);
@@ -351,6 +362,8 @@ export class RuntimeStore {
     targetBaseUrl: string;
     switchToNew?: boolean | undefined;
     upstreamTimeoutMs?: number | null | undefined;
+    customHeaders?: unknown;
+    headerRules?: unknown;
   }): { group: ProxyGroup; config: ProxyConfig } {
     const groupName = payload.name.trim();
     if (!groupName) {
@@ -365,11 +378,17 @@ export class RuntimeStore {
       throw new AppError(409, "targetBaseUrl already exists in another target.");
     }
 
+    const headers = parseHeadersConfig(payload, this.deps.randomUUID);
+    if (headers.problems.length > 0) {
+      throw new AppError(400, headers.problems.join(" "));
+    }
+
     const nextGroup = createGroup(
       groupName,
       normalizedTarget,
       this.deps.randomUUID,
       normalizeTimeout(payload.upstreamTimeoutMs),
+      headers,
     );
     this.proxyConfig.groups.push(nextGroup);
     this.ensureGroupHistory(nextGroup.id);
@@ -395,6 +414,8 @@ export class RuntimeStore {
       targetBaseUrl?: string | undefined;
       makeActive?: boolean | undefined;
       upstreamTimeoutMs?: number | null | undefined;
+      customHeaders?: unknown;
+      headerRules?: unknown;
     },
   ): { group: ProxyGroup; config: ProxyConfig } {
     const group = this.findGroupById(groupId);
@@ -406,10 +427,12 @@ export class RuntimeStore {
     const hasTarget = typeof payload.targetBaseUrl === "string";
     const hasActive = typeof payload.makeActive === "boolean";
     const hasTimeout = payload.upstreamTimeoutMs !== undefined;
-    if (!hasName && !hasTarget && !hasActive && !hasTimeout) {
+    const hasHeaders =
+      payload.customHeaders !== undefined || payload.headerRules !== undefined;
+    if (!hasName && !hasTarget && !hasActive && !hasTimeout && !hasHeaders) {
       throw new AppError(
         400,
-        "name, targetBaseUrl, makeActive or upstreamTimeoutMs is required.",
+        "name, targetBaseUrl, makeActive, upstreamTimeoutMs or headers is required.",
       );
     }
 
@@ -442,6 +465,21 @@ export class RuntimeStore {
 
     if (hasTimeout) {
       group.upstreamTimeoutMs = normalizeTimeout(payload.upstreamTimeoutMs);
+    }
+
+    if (hasHeaders) {
+      const headers = parseHeadersConfig(payload, this.deps.randomUUID);
+      if (headers.problems.length > 0) {
+        throw new AppError(400, headers.problems.join(" "));
+      }
+      // Replace only the list the caller actually sent: the dashboard saves
+      // both together, but one list must never be wiped by a partial update.
+      if (payload.customHeaders !== undefined) {
+        group.customHeaders = headers.customHeaders;
+      }
+      if (payload.headerRules !== undefined) {
+        group.headerRules = headers.headerRules;
+      }
     }
 
     if (payload.makeActive) {

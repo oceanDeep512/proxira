@@ -34,6 +34,38 @@ export interface ProxyGroup {
   targetBaseUrl: string;
   /** Upstream timeout override in ms; null means "use the global default". */
   upstreamTimeoutMs: number | null;
+  /** Headers appended to every outbound request for this target. */
+  customHeaders: ProxyHeaderEntry[];
+  /** Rewrite / drop rules, applied in order after `customHeaders`. */
+  headerRules: ProxyHeaderRule[];
+}
+
+// ---- Outbound request header rewriting ----------------------------------
+// A target often needs its own auth scheme (or a stripped-down header set)
+// without the app under test knowing. Fixed headers are appended first, then
+// the rules run over the result — so a rule may target a fixed header too.
+
+/** A header written onto every outbound request; same name = last one wins. */
+export interface ProxyHeaderEntry {
+  id: string;
+  name: string;
+  value: string;
+}
+
+export type ProxyHeaderRuleAction = "set" | "ignore";
+
+export interface ProxyHeaderRule {
+  id: string;
+  enabled: boolean;
+  /**
+   * Case-insensitive prefix match against the outgoing header name
+   * (e.g. `x-` matches `x-tenant-id` and `x-trace-id` at once).
+   */
+  namePrefix: string;
+  /** set = overwrite the matched headers; ignore = drop them entirely. */
+  action: ProxyHeaderRuleAction;
+  /** Replacement value; only used when `action` is `set`. */
+  value: string;
 }
 
 // ---- Intervention rules -------------------------------------------------

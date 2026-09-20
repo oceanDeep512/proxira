@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Textarea } from "../ui/Field";
 import { Modal } from "../ui/Modal";
 import { Pill } from "../ui/Pill";
+import { Toggle } from "../ui/Toggle";
 import { cn } from "../../lib/cn";
 
 export const ReplayDialog = ({
@@ -31,12 +32,14 @@ export const ReplayDialog = ({
     url: string;
     headersText: string;
     body: string;
+    useCustomHeaders: boolean;
   }) => void;
 }) => {
   const [method, setMethod] = useState("GET");
   const [url, setUrl] = useState("");
   const [headersText, setHeadersText] = useState("");
   const [body, setBody] = useState("");
+  const [useCustomHeaders, setUseCustomHeaders] = useState(false);
 
   useEffect(() => {
     if (!open || !record) return;
@@ -48,6 +51,8 @@ export const ReplayDialog = ({
         .join("\n"),
     );
     setBody(record.requestBody.text ?? "");
+    // 默认按「原样复现」重放：转发地址上的固定头 / 改写规则要显式开启。
+    setUseCustomHeaders(false);
     onOpenChangeResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, record?.id]);
@@ -74,7 +79,7 @@ export const ReplayDialog = ({
         <Button
           variant="primary"
           disabled={loading}
-          onClick={() => onSubmit({ method, url, headersText, body })}
+          onClick={() => onSubmit({ method, url, headersText, body, useCustomHeaders })}
         >
           {loading ? "发送中…" : "发送并重放"}
         </Button>
@@ -97,6 +102,20 @@ export const ReplayDialog = ({
             onChange={(event) => setHeadersText(event.target.value)}
           />
         </Field>
+
+        <div className="flex items-center gap-2.5 rounded-md border border-line bg-surface-2 px-3 py-2.5">
+          <Toggle
+            checked={useCustomHeaders}
+            onCheckedChange={setUseCustomHeaders}
+            label="启用自定义请求头"
+          />
+          <div className="min-w-0">
+            <p className="m-0 text-[13px] text-fg">启用自定义请求头</p>
+            <p className="m-0 text-[11px] leading-snug text-fg-dim">
+              套用当前转发地址的固定头与改写规则；关闭时完全按上面的 Headers 发送。
+            </p>
+          </div>
+        </div>
 
         <Field label="Body">
           <Textarea rows={5} value={body} onChange={(event) => setBody(event.target.value)} />

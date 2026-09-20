@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Pencil, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Pencil, Plus, ShieldCheck, Tags, Trash2 } from "lucide-react";
 import { selectActiveTarget, useProxiraStore } from "../../store/proxira";
 import { useUiStore } from "../../store/ui";
 import { IconButton } from "../ui/IconButton";
@@ -13,11 +13,13 @@ export const TargetHub = ({
   onEdit,
   onDelete,
   onRules,
+  onHeaders,
 }: {
   onCreate: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onRules: () => void;
+  onHeaders: () => void;
 }) => {
   const targets = useProxiraStore((state) => state.targets);
   const activeTarget = useProxiraStore(selectActiveTarget);
@@ -102,6 +104,11 @@ export const TargetHub = ({
               <ShieldCheck />
             </IconButton>
           </Tooltip>
+          <Tooltip label="请求头（固定头 / 改写规则）">
+            <IconButton label="请求头" onClick={onHeaders}>
+              <Tags />
+            </IconButton>
+          </Tooltip>
           <Tooltip label={showSensitive ? "当前：明文显示敏感信息" : "当前：敏感信息已脱敏"}>
             <IconButton
               label={showSensitive ? "隐藏敏感信息" : "显示敏感信息"}
@@ -120,6 +127,7 @@ export const TargetHub = ({
           onEdit={onEdit}
           onDelete={onDelete}
           onRules={onRules}
+          onHeaders={onHeaders}
         />
       </div>
     </section>
