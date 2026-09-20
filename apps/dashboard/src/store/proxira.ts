@@ -35,10 +35,13 @@ type ProxiraState = {
   recordsLoadingMore: boolean;
   selectedRecordId: string | null;
   /**
-   * 未读新请求数。只在「用户没停在最新一条」时累加 —— 已经跟着最新看的人
-   * 不需要被打扰。用来驱动面板里的「N 条新请求」浮动提示。
+   * 「忽略新请求提示」时记下当时的**最新一条 id**。
+   *
+   * 未读条数本身不在这里维护：它是从 `records` + `selectedRecordId` **派生**出来的
+   * （见 NewRecordNotice），所以天然不会算错、也不需要各处重置。
+   * 这里只记「我忽略到哪一条为止」，来了更新的记录提示会自己再冒出来。
    */
-  pendingNewCount: number;
+  dismissedNewestId: string | null;
   connectionState: ConnectionState;
   rules: ProxyRule[];
   deletingRecordId: string | null;
@@ -79,8 +82,8 @@ type ProxiraState = {
   }) => Promise<boolean>;
 
   selectRecord: (recordId: string | null) => void;
-  /** 清掉未读计数（点了提示、或用户主动忽略）。 */
-  acknowledgeNewRecords: () => void;
+  /** 忽略当前的新请求提示（不跳转）；更新的请求进来时会重新出现。 */
+  dismissNewRecords: () => void;
   removeRecord: (recordId: string) => Promise<void>;
   exportRecords: (filters: { method: string; status: string }) => Promise<void>;
   clearRecords: () => Promise<void>;
@@ -138,7 +141,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
   const fetchRecords = async (): Promise<void> => {
     const groupId = selectCurrentTargetId(get());
     if (!groupId) {
-      set({ records: [], recordsTotal: 0, selectedRecordId: null, pendingNewCount: 0 });
+      set({ records: [], recordsTotal: 0, selectedRecordId: null });
       return;
     }
 
@@ -146,8 +149,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
     if (!response.ok) throw new Error("加载历史记录失败");
 
     const payload = (await response.json()) as ProxyRecordsResponse;
-    // 整表重拉（首次加载 / 切转发地址）后列表已经是最新的，未读计数没有意义了。
-    set({ records: payload.items, recordsTotal: payload.total, pendingNewCount: 0 });
+    set({ records: payload.items, recordsTotal: payload.total });
 
     if (payload.items.length === 0) {
       set({ selectedRecordId: null });
@@ -220,19 +222,17 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
           next[index] = event.record;
           return { records: next };
         }
-        // 「有没有跟到最新」必须在这一条插进数组之前判断 —— 判断依据是
-        // 「当前选中的是不是当前最新那条」（selectedRecordId 为 null 表示本来就没在看）。
+        // 刻意**不**自动把选中挪到新记录。
         //
-        // 跟随状态下要**真的**把选中推进到新记录，而不是只是不提示：
-        // 否则用户看着最新一条，来了新请求既不提示也不跳转，会静默落后一条，
-        // 下一条通知的计数就从 1 开始少算 —— 「不打扰」和「不落下」必须同时成立。
-        const latestId = state.records[0]?.id ?? null;
-        const following = state.selectedRecordId === null || state.selectedRecordId === latestId;
+        // 试过自动跟随，结果是：用户只要没主动点过旧记录，就一直停在最新，
+        // 「有没有更新」永远是 false，新请求提示一辈子不出现 —— 而盯着面板看
+        // 新请求恰恰是最典型的用法。新请求的呈现方式是「底部浮出一条提示，
+        // 点它才跳」，所以这里必须让选中留在原地，让「有新请求」这件事可见。
         return {
           records: [event.record, ...state.records],
           recordsTotal: state.recordsTotal + 1,
-          selectedRecordId: following ? event.record.id : state.selectedRecordId,
-          pendingNewCount: following ? state.pendingNewCount : state.pendingNewCount + 1,
+          // 列表本来是空的（或刚被清空）时，第一条自动选中，省得对着空详情发呆。
+          selectedRecordId: state.selectedRecordId ?? event.record.id,
         };
       });
       return;
@@ -250,7 +250,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
 
     if (event.type === "records_cleared") {
       if (event.groupId !== groupId) return;
-      set({ records: [], recordsTotal: 0, selectedRecordId: null, pendingNewCount: 0 });
+      set({ records: [], recordsTotal: 0, selectedRecordId: null });
     }
   };
 
@@ -277,7 +277,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
     recordsTotal: 0,
     recordsLoadingMore: false,
     selectedRecordId: null,
-    pendingNewCount: 0,
+    dismissedNewestId: null,
     connectionState: "connecting",
     rules: [],
     deletingRecordId: null,
@@ -518,15 +518,9 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       }
     },
 
-    selectRecord: (recordId) =>
-      set((state) => ({
-        selectedRecordId: recordId,
-        // 手动点回最新一条 = 重新跟上，未读计数随即清零。
-        pendingNewCount:
-          recordId !== null && recordId === state.records[0]?.id ? 0 : state.pendingNewCount,
-      })),
+    selectRecord: (recordId) => set({ selectedRecordId: recordId }),
 
-    acknowledgeNewRecords: () => set({ pendingNewCount: 0 }),
+    dismissNewRecords: () => set((state) => ({ dismissedNewestId: state.records[0]?.id ?? null })),
 
     removeRecord: async (recordId) => {
       const groupId = selectCurrentTargetId(get());
@@ -626,7 +620,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
         });
         if (!response.ok) throw new Error("清除历史记录失败");
         const payload = (await response.json()) as { cleared: number };
-        set({ records: [], recordsTotal: 0, selectedRecordId: null, pendingNewCount: 0 });
+        set({ records: [], recordsTotal: 0, selectedRecordId: null });
         toast.success(`已清除 ${payload.cleared} 条历史记录`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "清除历史记录失败");
