@@ -1,6 +1,11 @@
 import type {
   ProxyConfig,
   ProxyGroup,
+  ProxyHeaderEntry,
+  ProxyHeaderPreset,
+  ProxyHeaderRule,
+  ProxyMockGroup,
+  ProxyMockRule,
   ProxyPayloadBody,
   ProxyRecordDetailResponse,
   ProxyRecordsExportResponse,
@@ -11,6 +16,15 @@ import type {
 } from "@proxira/core";
 import type { RuleInput } from "../rules/utils.js";
 import { createRule, findMatchingRule } from "../rules/utils.js";
+import type { MockRuleInput } from "../mock/utils.js";
+import {
+  createMockRule,
+  findMatchingMockRule,
+  MAX_MOCK_RULES,
+  normalizeMockGroupName,
+  normalizeMockGroups,
+} from "../mock/utils.js";
+import { normalizeHeaderPresets, normalizeIdList, normalizePresetName } from "../presets/utils.js";
 import type {
   ExportRecordsQuery,
   RecordsQuery,
@@ -87,6 +101,8 @@ export class RuntimeStore {
       activeGroupId: "",
       groups: [],
       targetBaseUrl: deps.config.defaultTargetBaseUrl,
+      headerPresets: [],
+      mockGroups: [],
     };
   }
 
@@ -145,6 +161,9 @@ export class RuntimeStore {
           upstreamTimeoutMs: normalizeTimeout(group.upstreamTimeoutMs),
           customHeaders: headers.customHeaders,
           headerRules: headers.headerRules,
+          // Ids are validated after the presets / mock groups exist.
+          headerPresetIds: normalizeIdList(group.headerPresetIds),
+          mockGroupIds: normalizeIdList(group.mockGroupIds),
         });
         usedGroupIds.add(groupId);
         usedTargets.add(normalizedTarget);
@@ -165,6 +184,27 @@ export class RuntimeStore {
     }
 
     this.proxyConfig.groups = hydratedGroups;
+    this.proxyConfig.headerPresets = normalizeHeaderPresets(
+      fileConfig?.headerPresets,
+      this.deps.randomUUID,
+    );
+    this.proxyConfig.mockGroups = normalizeMockGroups(
+      fileConfig?.mockGroups,
+      this.deps.randomUUID,
+    );
+
+    // Rules must exist before the mock migration can pick them apart.
+    this.rulesByGroup.clear();
+    for (const group of hydratedGroups) {
+      this.rulesByGroup.set(group.id, this.hydrateGroupRules(fileRules, group.id));
+    }
+
+    // One-time migrations: a config saved before groups existed keeps working,
+    // and from then on the user edits the group instead of the target.
+    this.migrateLegacyHeaders();
+    this.migrateLegacyMockRules();
+    this.pruneMissingGroupRefs();
+
     const preferredGroupId =
       typeof fileConfig?.activeGroupId === "string" ? fileConfig.activeGroupId : "";
     const selectedGroup =
@@ -185,14 +225,86 @@ export class RuntimeStore {
       );
     }
 
-    this.rulesByGroup.clear();
-    for (const group of hydratedGroups) {
-      this.rulesByGroup.set(group.id, this.hydrateGroupRules(fileRules, group.id));
-    }
-
     this.saveConfig();
     this.saveHistory();
     this.saveRules();
+  }
+
+  /**
+   * Targets used to carry their own header config. Move it into a preset and
+   * link it, so the settings screen has exactly one place to edit headers.
+   *
+   * The target's own lists are emptied on purpose: leaving them populated
+   * would migrate the same headers again on every restart, growing one preset
+   * per boot.
+   */
+  private migrateLegacyHeaders(): void {
+    for (const group of this.proxyConfig.groups) {
+      if (group.customHeaders.length === 0 && group.headerRules.length === 0) {
+        continue;
+      }
+      const preset: ProxyHeaderPreset = {
+        id: this.deps.randomUUID(),
+        name: normalizePresetName(`${group.name} 的请求头`, this.proxyConfig.headerPresets.length + 1),
+        customHeaders: group.customHeaders,
+        headerRules: group.headerRules,
+      };
+      this.proxyConfig.headerPresets.push(preset);
+      group.headerPresetIds = [preset.id, ...group.headerPresetIds];
+      group.customHeaders = [];
+      group.headerRules = [];
+    }
+  }
+
+  /**
+   * `action: "mock"` intervention rules predate the mock server. Lift them into
+   * their own group and drop them from rules.json — what stays there is failure
+   * injection, which is still per-target.
+   *
+   * Rule ids are not carried over: hydration already re-issues an id for every
+   * rule (see `createRule`), so a recorded `appliedRuleId` never survived a
+   * restart in the first place.
+   */
+  private migrateLegacyMockRules(): void {
+    for (const group of this.proxyConfig.groups) {
+      const rules = this.ensureGroupRules(group.id);
+      const mockRules = rules.filter((rule) => rule.action === "mock");
+      if (mockRules.length === 0) {
+        continue;
+      }
+
+      const mockGroup: ProxyMockGroup = {
+        id: this.deps.randomUUID(),
+        name: normalizeMockGroupName(
+          `${group.name} 的 Mock`,
+          this.proxyConfig.mockGroups.length + 1,
+        ),
+        enabled: true,
+        rules: mockRules.map((rule) =>
+          createMockRule(
+            {
+              id: rule.id,
+              name: rule.name,
+              enabled: rule.enabled,
+              matchPath: rule.matchPath,
+              matchMethod: rule.matchMethod,
+              delayMs: rule.delayMs,
+              status: rule.status,
+              headers: rule.headers,
+              body: rule.body,
+              stream: rule.stream,
+              chunkIntervalMs: rule.chunkIntervalMs,
+            },
+            this.deps.randomUUID,
+          ),
+        ),
+      };
+      this.proxyConfig.mockGroups.push(mockGroup);
+      group.mockGroupIds = [mockGroup.id, ...group.mockGroupIds];
+
+      const remaining = rules.filter((rule) => rule.action !== "mock");
+      this.rulesByGroup.set(group.id, remaining);
+    }
   }
 
   private hydrateGroupRules(
@@ -218,6 +330,283 @@ export class RuntimeStore {
   // Returns the first enabled rule matching this request, or null.
   matchRule(groupId: string, method: string, path: string): ProxyRule | null {
     return findMatchingRule(this.ensureGroupRules(groupId), method, path);
+  }
+
+  // ---- Header presets ---------------------------------------------------
+
+  listHeaderPresets(): ProxyHeaderPreset[] {
+    return this.proxyConfig.headerPresets;
+  }
+
+  /**
+   * The header layers for a target, in application order: the target's own
+   * (legacy, normally empty) config first, then every linked preset in the
+   * order the user listed them. A later layer overwrites what an earlier one
+   * wrote, which is what "后面的覆盖前面的" in the UI means.
+   */
+  resolveHeaderLayers(groupId: string): {
+    customHeaders: ProxyHeaderEntry[];
+    headerRules: ProxyHeaderRule[];
+  }[] {
+    const group = this.findGroupById(groupId);
+    if (!group) {
+      return [];
+    }
+
+    const layers = [
+      { customHeaders: group.customHeaders, headerRules: group.headerRules },
+    ];
+    // 顺序取自**全局分组列表**，不是引用数组的书写顺序：引用顺序取决于用户在
+    // 转发地址表单里先点了哪个，那是看不见的；列表顺序才是界面上明示的那一个。
+    for (const preset of this.proxyConfig.headerPresets) {
+      if (!group.headerPresetIds.includes(preset.id)) {
+        continue;
+      }
+      layers.push({
+        customHeaders: preset.customHeaders,
+        headerRules: preset.headerRules,
+      });
+    }
+    return layers;
+  }
+
+  createHeaderPreset(payload: {
+    name: string;
+    customHeaders?: unknown;
+    headerRules?: unknown;
+  }): { preset: ProxyHeaderPreset; config: ProxyConfig } {
+    const preset: ProxyHeaderPreset = {
+      id: this.deps.randomUUID(),
+      name: normalizePresetName(payload.name, this.proxyConfig.headerPresets.length + 1),
+      customHeaders: [],
+      headerRules: [],
+    };
+    // Reuse the strict path so a bad paste is rejected the same way it is when
+    // the dashboard saves an existing preset.
+    const applied = this.applyPresetConfig(preset, payload);
+    this.proxyConfig.headerPresets.push(applied);
+    return this.persistPresetChange(applied);
+  }
+
+  updateHeaderPreset(
+    presetId: string,
+    payload: { name?: string | undefined; customHeaders?: unknown; headerRules?: unknown },
+  ): { preset: ProxyHeaderPreset; config: ProxyConfig } | null {
+    const index = this.proxyConfig.headerPresets.findIndex((item) => item.id === presetId);
+    const current = this.proxyConfig.headerPresets[index];
+    if (!current) {
+      return null;
+    }
+
+    if (typeof payload.name === "string") {
+      const name = payload.name.trim();
+      if (!name) {
+        throw new AppError(400, "name cannot be empty.");
+      }
+      current.name = name;
+    }
+
+    const updated = this.applyPresetConfig(current, payload);
+    this.proxyConfig.headerPresets[index] = updated;
+    return this.persistPresetChange(updated);
+  }
+
+  deleteHeaderPreset(presetId: string): { removed: boolean; id: string; config: ProxyConfig } {
+    const index = this.proxyConfig.headerPresets.findIndex((item) => item.id === presetId);
+    if (index === -1) {
+      return { removed: false, id: presetId, config: this.proxyConfig };
+    }
+    this.proxyConfig.headerPresets.splice(index, 1);
+    // Dangling references would silently do nothing; unlink instead so the
+    // target form never shows a phantom selection.
+    for (const group of this.proxyConfig.groups) {
+      group.headerPresetIds = group.headerPresetIds.filter((id) => id !== presetId);
+    }
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { removed: true, id: presetId, config: this.proxyConfig };
+  }
+
+  moveHeaderPreset(
+    presetId: string,
+    direction: "up" | "down",
+  ): { config: ProxyConfig } {
+    this.moveInList(this.proxyConfig.headerPresets, presetId, direction);
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { config: this.proxyConfig };
+  }
+
+  private applyPresetConfig(
+    preset: ProxyHeaderPreset,
+    payload: { customHeaders?: unknown; headerRules?: unknown },
+  ): ProxyHeaderPreset {
+    if (payload.customHeaders === undefined && payload.headerRules === undefined) {
+      return preset;
+    }
+    const parsed = parseHeadersConfig(payload, this.deps.randomUUID);
+    if (parsed.problems.length > 0) {
+      throw new AppError(400, parsed.problems.join(" "));
+    }
+    if (payload.customHeaders !== undefined) {
+      preset.customHeaders = parsed.customHeaders;
+    }
+    if (payload.headerRules !== undefined) {
+      preset.headerRules = parsed.headerRules;
+    }
+    return preset;
+  }
+
+  private persistPresetChange(preset: ProxyHeaderPreset): {
+    preset: ProxyHeaderPreset;
+    config: ProxyConfig;
+  } {
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { preset, config: this.proxyConfig };
+  }
+
+  // ---- Mock groups ------------------------------------------------------
+
+  listMockGroups(): ProxyMockGroup[] {
+    return this.proxyConfig.mockGroups;
+  }
+
+  /**
+   * First match wins across every linked group, in the order the target listed
+   * them. A disabled group is skipped as a whole.
+   */
+  matchMockRule(
+    groupId: string,
+    method: string,
+    path: string,
+  ): { group: ProxyMockGroup; rule: ProxyMockRule } | null {
+    const group = this.findGroupById(groupId);
+    if (!group) {
+      return null;
+    }
+    // 同样按全局列表顺序问，与请求头分组保持一致。
+    for (const mockGroup of this.proxyConfig.mockGroups) {
+      if (!group.mockGroupIds.includes(mockGroup.id) || !mockGroup.enabled) {
+        continue;
+      }
+      const rule = findMatchingMockRule(mockGroup.rules, method, path);
+      if (rule) {
+        return { group: mockGroup, rule };
+      }
+    }
+    return null;
+  }
+
+  createMockGroup(payload: {
+    name: string;
+    enabled?: boolean | undefined;
+    rules?: unknown;
+  }): { group: ProxyMockGroup; config: ProxyConfig } {
+    const group: ProxyMockGroup = {
+      id: this.deps.randomUUID(),
+      name: normalizeMockGroupName(payload.name, this.proxyConfig.mockGroups.length + 1),
+      enabled: payload.enabled ?? true,
+      rules: [],
+    };
+    if (payload.rules !== undefined) {
+      group.rules = this.parseMockRules(payload.rules);
+    }
+    this.proxyConfig.mockGroups.push(group);
+    return this.persistMockGroupChange(group);
+  }
+
+  updateMockGroup(
+    groupId: string,
+    payload: {
+      name?: string | undefined;
+      enabled?: boolean | undefined;
+      rules?: unknown;
+    },
+  ): { group: ProxyMockGroup; config: ProxyConfig } | null {
+    const index = this.proxyConfig.mockGroups.findIndex((item) => item.id === groupId);
+    const current = this.proxyConfig.mockGroups[index];
+    if (!current) {
+      return null;
+    }
+
+    if (typeof payload.name === "string") {
+      const name = payload.name.trim();
+      if (!name) {
+        throw new AppError(400, "name cannot be empty.");
+      }
+      current.name = name;
+    }
+    if (typeof payload.enabled === "boolean") {
+      current.enabled = payload.enabled;
+    }
+    if (payload.rules !== undefined) {
+      current.rules = this.parseMockRules(payload.rules);
+    }
+    this.proxyConfig.mockGroups[index] = current;
+    return this.persistMockGroupChange(current);
+  }
+
+  deleteMockGroup(groupId: string): { removed: boolean; id: string; config: ProxyConfig } {
+    const index = this.proxyConfig.mockGroups.findIndex((item) => item.id === groupId);
+    if (index === -1) {
+      return { removed: false, id: groupId, config: this.proxyConfig };
+    }
+    this.proxyConfig.mockGroups.splice(index, 1);
+    for (const group of this.proxyConfig.groups) {
+      group.mockGroupIds = group.mockGroupIds.filter((id) => id !== groupId);
+    }
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { removed: true, id: groupId, config: this.proxyConfig };
+  }
+
+  moveMockGroup(groupId: string, direction: "up" | "down"): { config: ProxyConfig } {
+    this.moveInList(this.proxyConfig.mockGroups, groupId, direction);
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { config: this.proxyConfig };
+  }
+
+  private parseMockRules(raw: unknown): ProxyMockRule[] {
+    if (!Array.isArray(raw)) {
+      throw new AppError(400, "rules must be an array.");
+    }
+    if (raw.length > MAX_MOCK_RULES) {
+      throw new AppError(400, `rules accepts at most ${MAX_MOCK_RULES} entries.`);
+    }
+    return raw.map((item) => createMockRule((item ?? {}) as MockRuleInput, this.deps.randomUUID));
+  }
+
+  private persistMockGroupChange(group: ProxyMockGroup): {
+    group: ProxyMockGroup;
+    config: ProxyConfig;
+  } {
+    this.saveConfig();
+    this.broadcastEvent({ type: "config", config: this.proxyConfig });
+    return { group, config: this.proxyConfig };
+  }
+
+  private moveInList<T extends { id: string }>(
+    items: T[],
+    id: string,
+    direction: "up" | "down",
+  ): void {
+    const index = items.findIndex((item) => item.id === id);
+    if (index === -1) {
+      return;
+    }
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= items.length) {
+      return;
+    }
+    const current = items[index];
+    const neighbour = items[target];
+    if (!current || !neighbour) {
+      return;
+    }
+    items[index] = neighbour;
+    items[target] = current;
   }
 
   createRuleEntry(
@@ -364,6 +753,8 @@ export class RuntimeStore {
     upstreamTimeoutMs?: number | null | undefined;
     customHeaders?: unknown;
     headerRules?: unknown;
+    headerPresetIds?: string[] | undefined;
+    mockGroupIds?: string[] | undefined;
   }): { group: ProxyGroup; config: ProxyConfig } {
     const groupName = payload.name.trim();
     if (!groupName) {
@@ -390,6 +781,8 @@ export class RuntimeStore {
       normalizeTimeout(payload.upstreamTimeoutMs),
       headers,
     );
+    nextGroup.headerPresetIds = this.filterPresetIds(payload.headerPresetIds);
+    nextGroup.mockGroupIds = this.filterMockGroupIds(payload.mockGroupIds);
     this.proxyConfig.groups.push(nextGroup);
     this.ensureGroupHistory(nextGroup.id);
 
@@ -416,6 +809,8 @@ export class RuntimeStore {
       upstreamTimeoutMs?: number | null | undefined;
       customHeaders?: unknown;
       headerRules?: unknown;
+      headerPresetIds?: string[] | undefined;
+      mockGroupIds?: string[] | undefined;
     },
   ): { group: ProxyGroup; config: ProxyConfig } {
     const group = this.findGroupById(groupId);
@@ -429,10 +824,20 @@ export class RuntimeStore {
     const hasTimeout = payload.upstreamTimeoutMs !== undefined;
     const hasHeaders =
       payload.customHeaders !== undefined || payload.headerRules !== undefined;
-    if (!hasName && !hasTarget && !hasActive && !hasTimeout && !hasHeaders) {
+    const hasPresetIds = payload.headerPresetIds !== undefined;
+    const hasMockGroupIds = payload.mockGroupIds !== undefined;
+    if (
+      !hasName &&
+      !hasTarget &&
+      !hasActive &&
+      !hasTimeout &&
+      !hasHeaders &&
+      !hasPresetIds &&
+      !hasMockGroupIds
+    ) {
       throw new AppError(
         400,
-        "name, targetBaseUrl, makeActive, upstreamTimeoutMs or headers is required.",
+        "name, targetBaseUrl, makeActive, upstreamTimeoutMs, headers or groups is required.",
       );
     }
 
@@ -480,6 +885,15 @@ export class RuntimeStore {
       if (payload.headerRules !== undefined) {
         group.headerRules = headers.headerRules;
       }
+    }
+
+    // Unknown ids are dropped rather than rejected: a preset deleted in another
+    // tab must not make saving the target fail.
+    if (hasPresetIds) {
+      group.headerPresetIds = this.filterPresetIds(payload.headerPresetIds);
+    }
+    if (hasMockGroupIds) {
+      group.mockGroupIds = this.filterMockGroupIds(payload.mockGroupIds);
     }
 
     if (payload.makeActive) {
@@ -566,6 +980,9 @@ export class RuntimeStore {
     );
     this.proxyConfig.groups = [nextDefaultGroup];
     this.proxyConfig.activeGroupId = nextDefaultGroup.id;
+    // 分组是全局的，重置必须一起清掉，否则「清空所有数据」会留下一堆预设。
+    this.proxyConfig.headerPresets = [];
+    this.proxyConfig.mockGroups = [];
     this.syncConfigTargetBaseUrl();
 
     this.historyByGroup.clear();
@@ -791,6 +1208,48 @@ export class RuntimeStore {
 
   private findGroupById(groupId: string): ProxyGroup | undefined {
     return this.proxyConfig.groups.find((group) => group.id === groupId);
+  }
+
+  private filterPresetIds(raw: string[] | undefined): string[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const kept = raw.filter(
+      (id, index) =>
+        typeof id === "string" &&
+        id.trim().length > 0 &&
+        raw.indexOf(id) === index &&
+        this.proxyConfig.headerPresets.some((preset) => preset.id === id),
+    );
+    // 存成全局列表顺序：面板读到什么顺序，语义就是什么顺序。
+    return this.proxyConfig.headerPresets
+      .map((preset) => preset.id)
+      .filter((id) => kept.includes(id));
+  }
+
+  private filterMockGroupIds(raw: string[] | undefined): string[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const kept = raw.filter(
+      (id, index) =>
+        typeof id === "string" &&
+        id.trim().length > 0 &&
+        raw.indexOf(id) === index &&
+        this.proxyConfig.mockGroups.some((group) => group.id === id),
+    );
+    return this.proxyConfig.mockGroups
+      .map((group) => group.id)
+      .filter((id) => kept.includes(id));
+  }
+
+  /** Drops references to groups that no longer exist (deleted elsewhere, or a
+   *  hand-edited config.json). Cheap, and keeps the target form honest. */
+  private pruneMissingGroupRefs(): void {
+    for (const group of this.proxyConfig.groups) {
+      group.headerPresetIds = this.filterPresetIds(group.headerPresetIds);
+      group.mockGroupIds = this.filterMockGroupIds(group.mockGroupIds);
+    }
   }
 
   private syncConfigTargetBaseUrl(): void {

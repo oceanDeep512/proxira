@@ -12,8 +12,9 @@ import { Tooltip } from "../ui/Tooltip";
 import { EmptyState } from "../ui/EmptyState";
 import { cn } from "../../lib/cn";
 
+// 「Mock 响应」已经搬到设置 → Mock 拦截（全局分组、命中即返回）。
+// 这里只剩**故障注入**：仍然会打到上游，只是在去程或回程上做手脚。
 const ACTION_OPTIONS = [
-  { value: "mock", label: "Mock 响应", hint: "直接返回自定义状态与正文" },
   { value: "error", label: "直接失败", hint: "模拟网络/上游异常" },
   { value: "delay", label: "仅延迟", hint: "延迟后正常转发" },
   { value: "break_stream", label: "中断流", hint: "推送若干帧后断开" },
@@ -65,7 +66,7 @@ const emptyDraft: Draft = {
   matchPath: "/",
   matchMethod: "",
   delayMs: "0",
-  action: "mock",
+  action: "error",
   status: "200",
   headersText: "",
   body: "",
@@ -177,8 +178,8 @@ export const RuleManagerModal = ({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title="拦截规则"
-      description="命中规则的请求不会真正打到上游：可用于 Mock、延迟、断流与截断等故障注入。"
+      title="故障注入规则"
+      description="让上游「出错」而不是替它回答：延迟、直接失败、中断流、截断响应。要自定义响应内容请到设置 → Mock 拦截。"
       width="xl"
       footer={
         draft ? (
@@ -201,8 +202,8 @@ export const RuleManagerModal = ({
       <div className="flex flex-col gap-3">
         {rules.length === 0 && !draft ? (
           <EmptyState
-            title="还没有规则"
-            hint="新增一条规则，用路径片段 + Method 匹配需要拦截的请求。"
+            title="还没有故障注入规则"
+            hint="新增一条规则，用路径片段 + Method 匹配要「搞坏」的请求。"
             action={
               <Button variant="secondary" size="sm" onClick={() => setDraft({ ...emptyDraft })}>
                 <Plus className="size-4" />

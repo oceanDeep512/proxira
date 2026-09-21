@@ -1,26 +1,30 @@
 import { useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { FolderOpen, Moon, Settings as SettingsIcon, Sun, Tags, X, Zap } from "lucide-react";
-import { selectActiveTarget, useProxiraStore } from "../../store/proxira";
+import { useProxiraStore } from "../../store/proxira";
 import { useUiStore } from "../../store/ui";
 import { Button } from "../ui/Button";
 import { Toggle } from "../ui/Toggle";
-import { HeaderRulesEditor } from "../settings/HeaderRulesEditor";
+import { HeaderPresetEditor } from "../settings/HeaderPresetEditor";
+import { MockGroupEditor } from "../settings/MockGroupEditor";
 import { cn } from "../../lib/cn";
 
 type Tab = "general" | "headers" | "mock";
 
 const TABS: { id: Tab; label: string; icon: typeof SettingsIcon; hint: string }[] = [
   { id: "general", label: "通用", icon: SettingsIcon, hint: "数据目录 · 主题 · 重置" },
-  { id: "headers", label: "请求头", icon: Tags, hint: "固定头 · 匹配规则" },
-  { id: "mock", label: "Mock 拦截", icon: Zap, hint: "拦截规则（即将升级）" },
+  { id: "headers", label: "请求头", icon: Tags, hint: "分组 · 固定头 · 匹配规则" },
+  { id: "mock", label: "Mock 拦截", icon: Zap, hint: "分组 · 接口规则" },
 ];
 
 /**
  * 设置面板。左侧竖排标签 + 右侧内容区。
  *
- * 第一轮只落地「通用」标签（数据目录 / 打开文件夹 / 主题 / 重置）；
- * 请求头与 Mock 拦截标签先放过渡入口，仍打开原有弹窗 —— 数据模型升级在后续轮次。
+ * 「请求头」与「Mock 拦截」都是**分组**模型：分组是全局的，内含多条规则，
+ * 在「编辑转发地址」里勾选生效（可多选、按列表顺序生效）。设置里只负责定义
+ * 分组内容，不再按转发地址各存一份。
+ *
+ * 高度固定、内容区滚动：切标签时对话框不再忽高忽矮。
  *
  * 不复用通用 Modal：那个是 header + 单栏 body + footer 的结构，塞不下左侧标签导航。
  * 这里直接用 Radix DialogPrimitive 拼一个左右分栏的壳，样式与 Modal 保持一致。
@@ -28,19 +32,18 @@ const TABS: { id: Tab; label: string; icon: typeof SettingsIcon; hint: string }[
 export const SettingsModal = ({
   open,
   onOpenChange,
-  onOpenRules,
+  onOpenFaultRules,
   onRequestReset,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 过渡：打开原有拦截规则弹窗。 */
-  onOpenRules: () => void;
+  /** 打开故障注入规则弹窗（延迟 / 错误 / 断流 / 截断），仍按转发地址配置。 */
+  onOpenFaultRules: () => void;
   /** 触发重置确认流程（由 App 持有 ConfirmDialog）。 */
   onRequestReset: () => void;
 }) => {
   const [tab, setTab] = useState<Tab>("general");
 
-  const activeTarget = useProxiraStore(selectActiveTarget);
   const serverStatus = useProxiraStore((state) => state.serverStatus);
   const fetchingStatus = useProxiraStore((state) => state.fetchingStatus);
   const fetchServerStatus = useProxiraStore((state) => state.fetchServerStatus);
@@ -72,13 +75,13 @@ export const SettingsModal = ({
         <DialogPrimitive.Content
           className={cn(
             // 固定高度：切标签时对话框不再忽高忽矮，多出来的内容在右栏里滚。
-            // 宽度 860 是给请求头编辑器留的：原独立弹窗是 960，收到 760 时
-            // 「前缀 + 动作 + 值 + 删除」那一行会换行。
-            "fixed left-1/2 top-1/2 z-[1210] flex h-[min(620px,calc(100dvh-48px))] w-[calc(100vw-24px)]",
+            // 宽度 1080 是给「分组列表 + 编辑器」两栏留的：两栏加起来才放得下
+            // 请求头那几行输入（名称 / 值 / 删除）。
+            "fixed left-1/2 top-1/2 z-[1210] flex h-[min(660px,calc(100dvh-40px))] w-[calc(100vw-24px)]",
             "-translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",
             "rounded-lg border border-line bg-surface shadow-[var(--px-shadow-pop)]",
             "data-[state=open]:animate-[px-pop_180ms_cubic-bezier(0.22,1,0.36,1)]",
-            "max-w-[860px]",
+            "max-w-[1080px]",
           )}
         >
           <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
@@ -145,7 +148,7 @@ export const SettingsModal = ({
                       数据存储文件夹
                     </h3>
                     <p className="m-0 text-[12px] leading-relaxed text-fg-soft">
-                      历史记录、转发地址与规则配置都写在这个目录里。
+                      历史记录、转发地址、请求头与 Mock 分组配置都写在这个目录里。
                     </p>
                     <div className="flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2.5">
                       <code className="m-0 min-w-0 flex-1 truncate font-mono text-[12px] text-fg">
@@ -185,7 +188,7 @@ export const SettingsModal = ({
                       危险区
                     </h3>
                     <p className="m-0 text-[12px] leading-relaxed text-fg-soft">
-                      重置将删除全部转发地址、历史记录、规则与请求头配置，仅保留一个默认转发地址。不可撤销。
+                      重置将删除全部转发地址、历史记录、请求头与 Mock 分组，仅保留一个默认转发地址。不可撤销。
                     </p>
                     <div>
                       <Button variant="danger" onClick={onRequestReset} disabled={resettingAll}>
@@ -196,30 +199,9 @@ export const SettingsModal = ({
                 </div>
               ) : null}
 
-              {tab === "headers" ? (
-                <HeaderRulesEditor
-                  targetId={activeTarget?.id ?? ""}
-                  targetName={activeTarget?.name ?? ""}
-                  customHeaders={activeTarget?.customHeaders ?? []}
-                  headerRules={activeTarget?.headerRules ?? []}
-                />
-              ) : null}
+              {tab === "headers" ? <HeaderPresetEditor /> : null}
 
-              {tab === "mock" ? (
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <h3 className="m-0 font-display text-[14px] font-semibold text-fg">Mock 拦截</h3>
-                    <p className="m-0 mt-1 text-[12px] leading-relaxed text-fg-soft">
-                      当前为<strong className="font-medium">拦截规则</strong>（含 Mock 响应、延迟、断流、截断等故障注入），
-                      按转发地址分组。后续将拆分为独立的<strong className="font-medium">Mock 服务器</strong>，全局分组、命中即返回。
-                    </p>
-                  </div>
-                  <Button variant="secondary" onClick={onOpenRules} className="w-fit">
-                    <Zap className="size-4" />
-                    打开拦截规则
-                  </Button>
-                </div>
-              ) : null}
+              {tab === "mock" ? <MockGroupEditor onOpenFaultRules={onOpenFaultRules} /> : null}
             </div>
           </div>
         </DialogPrimitive.Content>

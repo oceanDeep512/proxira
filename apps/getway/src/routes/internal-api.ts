@@ -80,12 +80,16 @@ const headerConfigSchema = {
   headerRules: z.array(headerRuleSchema).max(100).optional(),
 };
 
+const idListSchema = z.array(z.string().trim().min(1)).max(100).optional();
+
 const createGroupSchema = z.object({
   name: z.string().trim().min(1),
   targetBaseUrl: z.string().trim().min(1),
   switchToNew: z.boolean().optional(),
   upstreamTimeoutMs: z.number().int().positive().nullable().optional(),
   ...headerConfigSchema,
+  headerPresetIds: idListSchema,
+  mockGroupIds: idListSchema,
 });
 
 const updateGroupSchema = z
@@ -95,6 +99,8 @@ const updateGroupSchema = z
     makeActive: z.boolean().optional(),
     upstreamTimeoutMs: z.number().int().positive().nullable().optional(),
     ...headerConfigSchema,
+    headerPresetIds: idListSchema,
+    mockGroupIds: idListSchema,
   })
   .refine(
     (value) =>
@@ -103,12 +109,56 @@ const updateGroupSchema = z
       typeof value.makeActive === "boolean" ||
       value.upstreamTimeoutMs !== undefined ||
       value.customHeaders !== undefined ||
-      value.headerRules !== undefined,
+      value.headerRules !== undefined ||
+      value.headerPresetIds !== undefined ||
+      value.mockGroupIds !== undefined,
     {
       message:
-        "name, targetBaseUrl, makeActive, upstreamTimeoutMs or headers is required.",
+        "name, targetBaseUrl, makeActive, upstreamTimeoutMs, headers or groups is required.",
     },
   );
+
+// Header presets and mock groups are saved as a whole (the dashboard keeps the
+// full list in its store), so the schemas mirror the persisted shape rather
+// than offering one endpoint per row.
+const presetSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  customHeaders: z.array(headerEntrySchema).max(100).optional(),
+  headerRules: z.array(headerRuleSchema).max(100).optional(),
+});
+
+const createPresetSchema = z.object({
+  name: z.string().trim().min(1),
+  ...headerConfigSchema,
+});
+
+const mockRuleSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
+  enabled: z.boolean().optional(),
+  matchPath: z.string().trim().min(1).optional(),
+  matchMethod: z.string().trim().min(1).nullable().optional(),
+  delayMs: z.number().int().min(0).max(60_000).optional(),
+  status: z.number().int().min(100).max(599).optional(),
+  headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
+  body: z.string().optional(),
+  stream: z.boolean().optional(),
+  chunkIntervalMs: z.number().int().min(0).max(10_000).optional(),
+});
+
+const mockGroupSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  enabled: z.boolean().optional(),
+  rules: z.array(mockRuleSchema).max(100).optional(),
+});
+
+const createMockGroupSchema = z.object({
+  name: z.string().trim().min(1),
+  enabled: z.boolean().optional(),
+  rules: z.array(mockRuleSchema).max(100).optional(),
+});
+
+const moveSchema = z.object({ direction: z.enum(["up", "down"]) });
 
 const recordsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).optional(),
@@ -218,6 +268,89 @@ export const createInternalApiRouter = (deps: {
   router.delete("/groups/:id", (c) => {
     return c.json(deps.runtime.deleteGroupEntry(c.req.param("id")));
   });
+
+  router.get("/header-presets", (c) => {
+    return c.json({ items: deps.runtime.listHeaderPresets() });
+  });
+
+  router.post(
+    "/header-presets",
+    zValidator("json", createPresetSchema, validationHook),
+    (c) => {
+      return c.json(deps.runtime.createHeaderPreset(c.req.valid("json")), 201);
+    },
+  );
+
+  router.put(
+    "/header-presets/:id",
+    zValidator("json", presetSchema, validationHook),
+    (c) => {
+      const updated = deps.runtime.updateHeaderPreset(
+        c.req.param("id"),
+        c.req.valid("json"),
+      );
+      if (!updated) {
+        return c.json({ message: "header preset not found." }, 404);
+      }
+      return c.json(updated);
+    },
+  );
+
+  router.delete("/header-presets/:id", (c) => {
+    const removed = deps.runtime.deleteHeaderPreset(c.req.param("id"));
+    return c.json(removed, removed.removed ? 200 : 404);
+  });
+
+  // Order matters: it decides which preset wins when two write the same header.
+  router.post(
+    "/header-presets/:id/move",
+    zValidator("json", moveSchema, validationHook),
+    (c) => {
+      return c.json(
+        deps.runtime.moveHeaderPreset(c.req.param("id"), c.req.valid("json").direction),
+      );
+    },
+  );
+
+  router.get("/mock-groups", (c) => {
+    return c.json({ items: deps.runtime.listMockGroups() });
+  });
+
+  router.post(
+    "/mock-groups",
+    zValidator("json", createMockGroupSchema, validationHook),
+    (c) => {
+      return c.json(deps.runtime.createMockGroup(c.req.valid("json")), 201);
+    },
+  );
+
+  router.put(
+    "/mock-groups/:id",
+    zValidator("json", mockGroupSchema, validationHook),
+    (c) => {
+      const updated = deps.runtime.updateMockGroup(c.req.param("id"), c.req.valid("json"));
+      if (!updated) {
+        return c.json({ message: "mock group not found." }, 404);
+      }
+      return c.json(updated);
+    },
+  );
+
+  router.delete("/mock-groups/:id", (c) => {
+    const removed = deps.runtime.deleteMockGroup(c.req.param("id"));
+    return c.json(removed, removed.removed ? 200 : 404);
+  });
+
+  // Same reason as the presets: the order decides which group is asked first.
+  router.post(
+    "/mock-groups/:id/move",
+    zValidator("json", moveSchema, validationHook),
+    (c) => {
+      return c.json(
+        deps.runtime.moveMockGroup(c.req.param("id"), c.req.valid("json").direction),
+      );
+    },
+  );
 
   router.post("/reset", (c) => {
     return c.json(deps.runtime.resetAll());

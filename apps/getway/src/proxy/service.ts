@@ -1,5 +1,7 @@
 import type {
   ProxyGroup,
+  ProxyHeaderEntry,
+  ProxyHeaderRule,
   ProxyHeaders,
   ProxyPayloadBody,
   ProxyQueryParams,
@@ -38,15 +40,21 @@ const STREAM_SAMPLE_EMIT_INTERVAL_MS = 1_000;
  * Builds the header set actually sent upstream for a target.
  *
  * The order is the contract: strip what the proxy owns, delete accept-encoding
- * (uncompressed replies keep the dashboard readable), write the target's fixed
- * headers, then run the rules — so a rule can rewrite or drop a fixed header as
- * well. Protected names are stripped once more at the end, which is what keeps
- * a saved rule from resurrecting host / content-length / accept-encoding.
+ * (uncompressed replies keep the dashboard readable), then apply every header
+ * layer in order — the target's own (legacy) config first, then each linked
+ * preset. A later layer overwrites an earlier one. Protected names are stripped
+ * once more at the end, which is what keeps a saved rule from resurrecting
+ * host / content-length / accept-encoding.
  */
-const buildUpstreamRequestHeaders = (incoming: Headers, group: ProxyGroup): Headers => {
+const buildUpstreamRequestHeaders = (
+  incoming: Headers,
+  layers: readonly { customHeaders: readonly ProxyHeaderEntry[]; headerRules: readonly ProxyHeaderRule[] }[],
+): Headers => {
   const headers = stripHeaders(incoming, REQUEST_STRIP_HEADERS);
   headers.delete("accept-encoding");
-  applyHeaderRules(headers, group.customHeaders, group.headerRules);
+  for (const layer of layers) {
+    applyHeaderRules(headers, layer.customHeaders, layer.headerRules);
+  }
   return headers;
 };
 
@@ -225,7 +233,42 @@ export class ProxyService {
       });
     }
 
-    const upstreamRequestHeaders = buildUpstreamRequestHeaders(request.headers, activeGroup);
+    const upstreamRequestHeaders = buildUpstreamRequestHeaders(
+      request.headers,
+      this.runtime.resolveHeaderLayers(activeGroup.id),
+    );
+
+    // Mock groups answer before anything else: a hit never reaches the
+    // upstream, so it also never needs the upstream deadline.
+    const mockHit = this.runtime.matchMockRule(
+      activeGroup.id,
+      method,
+      incomingUrl.pathname,
+    );
+    if (mockHit) {
+      return this.respondWithMock(
+        {
+          id: mockHit.rule.id,
+          name: `${mockHit.group.name} / ${mockHit.rule.name}`,
+          delayMs: mockHit.rule.delayMs,
+          status: mockHit.rule.status,
+          headers: mockHit.rule.headers,
+          body: mockHit.rule.body,
+          stream: mockHit.rule.stream,
+          chunkIntervalMs: mockHit.rule.chunkIntervalMs,
+        },
+        {
+          startedAtMs,
+          activeGroup,
+          method,
+          path: incomingUrl.pathname,
+          query,
+          requestHeaders,
+          requestBody,
+          upstreamUrl: upstreamUrl.toString(),
+        },
+      );
+    }
 
     // The timeout is meant to bound "waiting for the upstream to answer", not
     // "how long the answer may take to stream". An SSE / LLM stream can run for
@@ -472,7 +515,10 @@ export class ProxyService {
   // client — failures simply leave the record with a null body.
   // Emit a stubbed body either at once or as a paced SSE stream, so mock rules
   // can imitate a real token stream instead of a single blob.
-  private buildRuleStream(rule: ProxyRule): ReadableStream<Uint8Array> {
+  private buildRuleStream(rule: {
+    body: string;
+    chunkIntervalMs: number;
+  }): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
     const chunks = rule.body
       .split(/\n\s*\n/)
@@ -609,11 +655,9 @@ export class ProxyService {
     // request"; turning this on re-applies the active target's fixed headers
     // and rules, which is what you want when the auth scheme lives there.
     if (payload.useCustomHeaders === true) {
-      applyHeaderRules(
-        upstreamRequestHeaders,
-        activeGroup.customHeaders,
-        activeGroup.headerRules,
-      );
+      for (const layer of this.runtime.resolveHeaderLayers(activeGroup.id)) {
+        applyHeaderRules(upstreamRequestHeaders, layer.customHeaders, layer.headerRules);
+      }
     }
 
     const encoder = new TextEncoder();
@@ -690,6 +734,111 @@ export class ProxyService {
     }
   }
 
+  /**
+   * Answers a request from a mock rule — either a mock group hit or a legacy
+   * `mock` intervention rule. The upstream is never contacted; the answer is
+   * still recorded so the dashboard shows what the client actually got.
+   */
+  private async respondWithMock(
+    spec: {
+      id: string;
+      name: string;
+      delayMs: number;
+      status: number;
+      headers: ProxyHeaders;
+      body: string;
+      stream: boolean;
+      chunkIntervalMs: number;
+    },
+    ctx: {
+      startedAtMs: number;
+      activeGroup: ProxyGroup;
+      method: string;
+      path: string;
+      query: ProxyQueryParams;
+      requestHeaders: ProxyHeaders;
+      requestBody: ProxyPayloadBody;
+      upstreamUrl: string;
+    },
+  ): Promise<Response> {
+    if (spec.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, spec.delayMs));
+    }
+
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(spec.headers)) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          headers.append(name, item);
+        }
+      } else if (value !== undefined) {
+        headers.set(name, value);
+      }
+    }
+    if (spec.stream) {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "text/event-stream");
+      }
+    } else if (!headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+
+    const base = {
+      groupId: ctx.activeGroup.id,
+      method: ctx.method,
+      path: ctx.path,
+      query: ctx.query,
+      requestHeaders: ctx.requestHeaders,
+      requestBody: ctx.requestBody,
+      upstreamUrl: ctx.upstreamUrl,
+      durationMs: this.deps.now() - ctx.startedAtMs,
+      appliedRuleId: spec.id,
+      source: "proxy" as const,
+    };
+
+    const bytes = new TextEncoder().encode(spec.body);
+    const downstreamHeaders = buildDownstreamHeaders(headers, ctx.method);
+
+    if (spec.stream) {
+      const [clientStream, captureStream] = this.buildRuleStream(spec).tee();
+      const record = this.createRecord({
+        ...base,
+        responseStatus: spec.status,
+        responseHeaders: collectHeaders(headers),
+        responseBody: null,
+        error: null,
+      });
+      this.runtime.addProxyRecord(ctx.activeGroup.id, record);
+      void this.sampleStreamingResponse(
+        captureStream,
+        headers.get("content-type"),
+        record.id,
+        ctx.activeGroup.id,
+      );
+      return new Response(clientStream, {
+        status: spec.status,
+        headers: downstreamHeaders,
+      });
+    }
+
+    const record = this.createRecord({
+      ...base,
+      responseStatus: spec.status,
+      responseHeaders: collectHeaders(headers),
+      responseBody: collectBody(
+        bytes,
+        headers.get("content-type"),
+        this.deps.config.maxBodyCaptureBytes,
+      ),
+      error: null,
+    });
+    this.runtime.addProxyRecord(ctx.activeGroup.id, record);
+    return new Response(isBodilessStatus(spec.status) ? null : bytes, {
+      status: spec.status,
+      headers: downstreamHeaders,
+    });
+  }
+
   private async applyRule(ctx: {
     rule: ProxyRule;
     startedAtMs: number;
@@ -728,66 +877,30 @@ export class ProxyService {
       source: "proxy" as const,
     };
 
+    // Legacy `mock` intervention rules answer exactly like a mock group rule,
+    // so both go through the same builder.
     if (rule.action === "mock") {
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(rule.headers)) {
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            headers.append(name, item);
-          }
-        } else if (value !== undefined) {
-          headers.set(name, value);
-        }
-      }
-      if (rule.stream) {
-        if (!headers.has("content-type")) {
-          headers.set("content-type", "text/event-stream");
-        }
-      } else if (!headers.has("content-type")) {
-        headers.set("content-type", "application/json");
-      }
-
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(rule.body);
-      const downstreamHeaders = buildDownstreamHeaders(headers, ctx.method);
-
-      if (rule.stream) {
-        const [clientStream, captureStream] = this.buildRuleStream(rule).tee();
-        const record = this.createRecord({
-          ...base,
-          responseStatus: rule.status,
-          responseHeaders: collectHeaders(headers),
-          responseBody: null,
-          error: null,
-        });
-        this.runtime.addProxyRecord(ctx.activeGroup.id, record);
-        void this.sampleStreamingResponse(
-          captureStream,
-          headers.get("content-type"),
-          record.id,
-          ctx.activeGroup.id,
-        );
-        return new Response(clientStream, {
+      return this.respondWithMock(
+        {
+          id: rule.id,
+          name: rule.name,
+          delayMs: rule.delayMs,
           status: rule.status,
-          headers: downstreamHeaders,
-        });
-      }
-
-      const record = this.createRecord({
-        ...base,
-        responseStatus: rule.status,
-        responseHeaders: collectHeaders(headers),
-        responseBody: collectBody(
-          bytes,
-          headers.get("content-type"),
-          this.deps.config.maxBodyCaptureBytes,
-        ),
-        error: null,
-      });
-      this.runtime.addProxyRecord(ctx.activeGroup.id, record);
-      return new Response(
-        isBodilessStatus(rule.status) ? null : bytes,
-        { status: rule.status, headers: downstreamHeaders },
+          headers: rule.headers,
+          body: rule.body,
+          stream: rule.stream,
+          chunkIntervalMs: rule.chunkIntervalMs,
+        },
+        {
+          startedAtMs: ctx.startedAtMs,
+          activeGroup: ctx.activeGroup,
+          method: ctx.method,
+          path: ctx.path,
+          query: ctx.query,
+          requestHeaders: ctx.requestHeaders,
+          requestBody: ctx.requestBody,
+          upstreamUrl: ctx.upstreamUrl,
+        },
       );
     }
 

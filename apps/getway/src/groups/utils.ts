@@ -29,6 +29,8 @@ export const createGroup = (
     upstreamTimeoutMs: normalizeTimeout(upstreamTimeoutMs),
     customHeaders: headers.customHeaders ?? [],
     headerRules: headers.headerRules ?? [],
+    headerPresetIds: [],
+    mockGroupIds: [],
   };
 };
 

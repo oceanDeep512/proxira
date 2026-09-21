@@ -3,7 +3,10 @@ import type {
   ProxyConfig,
   ProxyGroup,
   ProxyHeaderEntry,
+  ProxyHeaderPreset,
   ProxyHeaderRule,
+  ProxyMockGroup,
+  ProxyMockRule,
   ProxyRecordsResponse,
   ProxyRule,
   ProxyServerStatus,
@@ -31,6 +34,10 @@ export type ReplayResult = {
 type ProxiraState = {
   targets: ProxyGroup[];
   activeTargetId: string;
+  /** 全局请求头分组（可被多个转发地址引用）。 */
+  headerPresets: ProxyHeaderPreset[];
+  /** 全局 Mock 拦截分组。 */
+  mockGroups: ProxyMockGroup[];
   records: ProxyTrafficRecord[];
   recordsTotal: number;
   recordsLoadingMore: boolean;
@@ -75,17 +82,37 @@ type ProxiraState = {
     name: string,
     targetBaseUrl: string,
     upstreamTimeoutMs: number | null,
+    groups?: { headerPresetIds?: string[]; mockGroupIds?: string[] },
   ) => Promise<boolean>;
   saveActiveTarget: (
     name: string,
     targetBaseUrl: string,
     upstreamTimeoutMs: number | null,
+    groups?: { headerPresetIds?: string[]; mockGroupIds?: string[] },
   ) => Promise<boolean>;
   deleteTarget: (target: ProxyGroup) => Promise<boolean>;
-  saveTargetHeaders: (payload: {
-    customHeaders: ProxyHeaderEntry[];
-    headerRules: ProxyHeaderRule[];
-  }) => Promise<boolean>;
+
+  /** 返回新建分组的 id，便于面板立刻选中它；失败返回 null。 */
+  createHeaderPreset: (name: string) => Promise<string | null>;
+  saveHeaderPreset: (
+    presetId: string,
+    payload: {
+      name?: string;
+      customHeaders?: ProxyHeaderEntry[];
+      headerRules?: ProxyHeaderRule[];
+    },
+  ) => Promise<boolean>;
+  removeHeaderPreset: (presetId: string) => Promise<void>;
+  moveHeaderPreset: (presetId: string, direction: "up" | "down") => Promise<void>;
+
+  /** 返回新建分组的 id，便于面板立刻选中它；失败返回 null。 */
+  createMockGroup: (name: string) => Promise<string | null>;
+  saveMockGroup: (
+    groupId: string,
+    payload: { name?: string; enabled?: boolean; rules?: ProxyMockRule[] },
+  ) => Promise<boolean>;
+  removeMockGroup: (groupId: string) => Promise<void>;
+  moveMockGroup: (groupId: string, direction: "up" | "down") => Promise<void>;
 
   selectRecord: (recordId: string | null) => void;
   /** 忽略当前的新请求提示（不跳转）；更新的请求进来时会重新出现。 */
@@ -133,7 +160,12 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       config.groups.find((entry) => entry.id === config.activeGroupId) ??
       config.groups[0] ??
       null;
-    set({ targets: config.groups, activeTargetId: matched?.id ?? "" });
+    set({
+      targets: config.groups,
+      activeTargetId: matched?.id ?? "",
+      headerPresets: config.headerPresets ?? [],
+      mockGroups: config.mockGroups ?? [],
+    });
   };
 
   const fetchConfig = async (): Promise<void> => {
@@ -283,6 +315,8 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
   return {
     targets: [],
     activeTargetId: "",
+    headerPresets: [],
+    mockGroups: [],
     records: [],
     recordsTotal: 0,
     recordsLoadingMore: false,
@@ -384,7 +418,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       }
     },
 
-    createTarget: async (name, targetBaseUrl, upstreamTimeoutMs) => {
+    createTarget: async (name, targetBaseUrl, upstreamTimeoutMs, groups) => {
       const nextName = name.trim();
       if (!nextName) {
         toast.error("名称为必填项");
@@ -411,6 +445,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
             // 创建绝不劫持线上流量：不自动切换。
             switchToNew: false,
             upstreamTimeoutMs,
+            ...groups,
           }),
         });
         if (!response.ok) {
@@ -428,7 +463,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       }
     },
 
-    saveActiveTarget: async (name, targetBaseUrl, upstreamTimeoutMs) => {
+    saveActiveTarget: async (name, targetBaseUrl, upstreamTimeoutMs, groups) => {
       const groupId = selectCurrentTargetId(get());
       if (!groupId) {
         toast.error("当前没有可用转发地址");
@@ -461,6 +496,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
             targetBaseUrl: normalized,
             makeActive: true,
             upstreamTimeoutMs,
+            ...groups,
           }),
         });
         if (!response.ok) {
@@ -477,29 +513,175 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       }
     },
 
-    saveTargetHeaders: async (payload) => {
-      const groupId = selectCurrentTargetId(get());
-      if (!groupId) {
-        toast.error("当前没有可用转发地址");
-        return false;
+    createHeaderPreset: async (name) => {
+      const nextName = name.trim();
+      if (!nextName) {
+        toast.error("分组名称为必填项");
+        return null;
       }
       try {
-        const response = await apiFetch(`/_proxira/api/groups/${encodeURIComponent(groupId)}`, {
-          method: "PUT",
+        const response = await apiFetch("/_proxira/api/header-presets", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          // 只带请求头这两个字段：服务端按「传了什么就替换什么」处理，
-          // 不会顺手把名称/地址也写一遍。
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ name: nextName }),
         });
         if (!response.ok) {
-          throw new Error(await extractErrorMessage(response, "保存请求头失败"));
+          throw new Error(await extractErrorMessage(response, "创建分组失败"));
+        }
+        const payload = (await response.json()) as {
+          preset: ProxyHeaderPreset;
+          config: ProxyConfig;
+        };
+        syncConfig(payload.config);
+        toast.success("请求头分组已创建");
+        return payload.preset.id;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "创建分组失败");
+        return null;
+      }
+    },
+
+    saveHeaderPreset: async (presetId, payload) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/header-presets/${encodeURIComponent(presetId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            // 只带这次真正改了的字段：服务端按「传了什么就替换什么」处理，
+            // 不会顺手把别的分组也写一遍。
+            body: JSON.stringify(payload),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "保存请求头分组失败"));
         }
         syncConfig(((await response.json()) as { config: ProxyConfig }).config);
-        toast.success("请求头配置已保存");
+        toast.success("请求头分组已保存");
         return true;
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "保存请求头失败");
+        toast.error(error instanceof Error ? error.message : "保存请求头分组失败");
         return false;
+      }
+    },
+
+    removeHeaderPreset: async (presetId) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/header-presets/${encodeURIComponent(presetId)}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "删除分组失败"));
+        }
+        syncConfig(((await response.json()) as { config: ProxyConfig }).config);
+        toast.success("请求头分组已删除");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "删除分组失败");
+      }
+    },
+
+    moveHeaderPreset: async (presetId, direction) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/header-presets/${encodeURIComponent(presetId)}/move`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ direction }),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "调整顺序失败"));
+        }
+        syncConfig(((await response.json()) as { config: ProxyConfig }).config);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "调整顺序失败");
+      }
+    },
+
+    createMockGroup: async (name) => {
+      const nextName = name.trim();
+      if (!nextName) {
+        toast.error("分组名称为必填项");
+        return null;
+      }
+      try {
+        const response = await apiFetch("/_proxira/api/mock-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nextName }),
+        });
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "创建分组失败"));
+        }
+        const payload = (await response.json()) as {
+          group: ProxyMockGroup;
+          config: ProxyConfig;
+        };
+        syncConfig(payload.config);
+        toast.success("Mock 分组已创建");
+        return payload.group.id;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "创建分组失败");
+        return null;
+      }
+    },
+
+    saveMockGroup: async (groupId, payload) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/mock-groups/${encodeURIComponent(groupId)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "保存 Mock 分组失败"));
+        }
+        syncConfig(((await response.json()) as { config: ProxyConfig }).config);
+        toast.success("Mock 分组已保存");
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "保存 Mock 分组失败");
+        return false;
+      }
+    },
+
+    removeMockGroup: async (groupId) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/mock-groups/${encodeURIComponent(groupId)}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "删除分组失败"));
+        }
+        syncConfig(((await response.json()) as { config: ProxyConfig }).config);
+        toast.success("Mock 分组已删除");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "删除分组失败");
+      }
+    },
+
+    moveMockGroup: async (groupId, direction) => {
+      try {
+        const response = await apiFetch(
+          `/_proxira/api/mock-groups/${encodeURIComponent(groupId)}/move`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ direction }),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(await extractErrorMessage(response, "调整顺序失败"));
+        }
+        syncConfig(((await response.json()) as { config: ProxyConfig }).config);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "调整顺序失败");
       }
     },
 

@@ -76,10 +76,11 @@ export const createRule = (
   };
 };
 
-// A rule matches when the path contains the configured fragment and the
-// method filter (if any) agrees. First enabled match wins.
-export const ruleMatches = (
-  rule: ProxyRule,
+/** The match contract shared by intervention rules and mock rules: a rule
+ *  matches when the path contains the configured fragment and the method
+ *  filter (if any) agrees. First enabled match wins. */
+export const matchesRequest = (
+  rule: { enabled: boolean; matchPath: string; matchMethod: string | null },
   method: string,
   path: string,
 ): boolean => {
@@ -95,6 +96,12 @@ export const ruleMatches = (
   }
   return path.toLowerCase().includes(needle.toLowerCase());
 };
+
+export const ruleMatches = (
+  rule: ProxyRule,
+  method: string,
+  path: string,
+): boolean => matchesRequest(rule, method, path);
 
 export const findMatchingRule = (
   rules: ProxyRule[],

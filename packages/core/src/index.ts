@@ -26,6 +26,10 @@ export interface ProxyConfig {
   activeGroupId: string;
   groups: ProxyGroup[];
   targetBaseUrl: string;
+  /** Reusable header groups. Targets reference them by id. */
+  headerPresets: ProxyHeaderPreset[];
+  /** Reusable mock groups. Targets reference them by id. */
+  mockGroups: ProxyMockGroup[];
 }
 
 export interface ProxyGroup {
@@ -34,10 +38,17 @@ export interface ProxyGroup {
   targetBaseUrl: string;
   /** Upstream timeout override in ms; null means "use the global default". */
   upstreamTimeoutMs: number | null;
-  /** Headers appended to every outbound request for this target. */
+  /**
+   * Legacy per-target header config, kept only so an old config.json still
+   * loads. Hydration migrates it into a `ProxyHeaderPreset` and empties these
+   * two lists, so at runtime they are normally empty.
+   */
   customHeaders: ProxyHeaderEntry[];
-  /** Rewrite / drop rules, applied in order after `customHeaders`. */
   headerRules: ProxyHeaderRule[];
+  /** Header groups applied to this target, in order — later ones win. */
+  headerPresetIds: string[];
+  /** Mock groups applied to this target, in order — first match wins. */
+  mockGroupIds: string[];
 }
 
 // ---- Outbound request header rewriting ----------------------------------
@@ -68,6 +79,56 @@ export interface ProxyHeaderRule {
   value: string;
 }
 
+// ---- Reusable header groups ---------------------------------------------
+// A preset bundles fixed headers + rewrite rules under one name, so several
+// targets can share "our staging auth" instead of copy-pasting it. A target
+// may apply several presets: they run in the listed order and a later preset
+// overwrites what an earlier one wrote.
+
+export interface ProxyHeaderPreset {
+  id: string;
+  name: string;
+  /** Headers appended to every outbound request; same name = last one wins. */
+  customHeaders: ProxyHeaderEntry[];
+  /** Rewrite / drop rules, applied in order after `customHeaders`. */
+  headerRules: ProxyHeaderRule[];
+}
+
+// ---- Mock server --------------------------------------------------------
+// Mock answers live in their own groups, independent of the forwarding
+// targets: a group holds many rules, and a target opts into the groups it
+// wants. A hit returns immediately — the upstream is never contacted.
+
+export interface ProxyMockRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Substring match against the incoming path (case-insensitive). */
+  matchPath: string;
+  /** Optional method filter; null matches every method. */
+  matchMethod: string | null;
+  /** Extra delay before responding. */
+  delayMs: number;
+  /** Response status code. */
+  status: number;
+  /** Response headers. */
+  headers: ProxyHeaders;
+  /** Response body (sent at once, or chunk by chunk when streaming). */
+  body: string;
+  /** Emit the body as an SSE stream, one chunk per line block. */
+  stream: boolean;
+  /** Gap between streamed chunks. */
+  chunkIntervalMs: number;
+}
+
+export interface ProxyMockGroup {
+  id: string;
+  name: string;
+  /** A disabled group is skipped entirely, whatever its rules say. */
+  enabled: boolean;
+  rules: ProxyMockRule[];
+}
+
 // ---- Intervention rules -------------------------------------------------
 // Rules let the proxy answer or sabotage a request on purpose, so failure
 // paths (timeouts, truncated streams, 5xx) can be reproduced without touching
@@ -91,6 +152,11 @@ export type ProxyRule = {
   matchMethod: string | null;
   /** Extra delay before anything else happens. */
   delayMs: number;
+  /**
+   * `mock` is legacy: hydration migrates those rules into `ProxyMockGroup`s
+   * and they are no longer offered in the UI. The action stays supported so a
+   * hand-written rules.json keeps behaving the way it always did.
+   */
   action: ProxyRuleActionType;
   /** mock: response status code. */
   status: number;

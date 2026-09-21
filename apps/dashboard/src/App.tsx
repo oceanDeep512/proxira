@@ -43,6 +43,8 @@ const App = () => {
   const selectedRecordId = useProxiraStore((state) => state.selectedRecordId);
   const activeTarget = useProxiraStore(selectActiveTarget);
   const rules = useProxiraStore((state) => state.rules);
+  const headerPresets = useProxiraStore((state) => state.headerPresets);
+  const mockGroups = useProxiraStore((state) => state.mockGroups);
   const resettingAll = useProxiraStore((state) => state.resettingAll);
   const targetModalSubmitting = useProxiraStore((state) => state.targetModalSubmitting);
   const deleteTargetSubmitting = useProxiraStore((state) => state.deleteTargetSubmitting);
@@ -120,17 +122,45 @@ const App = () => {
     [records],
   );
 
+  // 转发地址表单里的可勾选项：全局分组，只带名字与条数。
+  const headerPresetOptions = useMemo(
+    () =>
+      headerPresets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        meta: `${preset.customHeaders.length} 固定头 · ${preset.headerRules.length} 规则`,
+      })),
+    [headerPresets],
+  );
+  const mockGroupOptions = useMemo(
+    () =>
+      mockGroups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        meta: `${group.rules.length} 条接口${group.enabled ? "" : " · 已停用"}`,
+      })),
+    [mockGroups],
+  );
+
   const targetFormValue: TargetFormValue = {
     name: activeTarget?.name ?? "",
     targetBaseUrl: activeTarget?.targetBaseUrl ?? "",
     upstreamTimeoutMs: activeTarget?.upstreamTimeoutMs ?? null,
+    headerPresetIds: activeTarget?.headerPresetIds ?? [],
+    mockGroupIds: activeTarget?.mockGroupIds ?? [],
   };
 
   const submitTargetForm = async (value: TargetFormValue): Promise<void> => {
+    // 「勾选了哪些分组」和名称/地址一起提交：分组本体是全局的，
+    // 这里只保存引用。
+    const groups = {
+      headerPresetIds: value.headerPresetIds,
+      mockGroupIds: value.mockGroupIds,
+    };
     const ok =
       targetModal?.mode === "create"
-        ? await createTarget(value.name, value.targetBaseUrl, value.upstreamTimeoutMs)
-        : await saveActiveTarget(value.name, value.targetBaseUrl, value.upstreamTimeoutMs);
+        ? await createTarget(value.name, value.targetBaseUrl, value.upstreamTimeoutMs, groups)
+        : await saveActiveTarget(value.name, value.targetBaseUrl, value.upstreamTimeoutMs, groups);
     if (ok) setTargetModal(null);
   };
 
@@ -224,6 +254,8 @@ const App = () => {
         onOpenChange={(open) => !open && setTargetModal(null)}
         mode={targetModal?.mode ?? "create"}
         initialValue={targetFormValue}
+        headerPresetOptions={headerPresetOptions}
+        mockGroupOptions={mockGroupOptions}
         loading={targetModalSubmitting}
         onSubmit={submitTargetForm}
       />
@@ -284,7 +316,7 @@ const App = () => {
       <SettingsModal
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        onOpenRules={() => {
+        onOpenFaultRules={() => {
           setSettingsOpen(false);
           openRulesModal();
         }}
