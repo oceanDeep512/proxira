@@ -177,8 +177,12 @@ proxira migrate-data                   # 把旧版 ./.proxira 迁到统一目录
 | `PROXY_DATA_DIR` | 数据目录 | `./.proxira` |
 | `PROXY_PREFIX` | 代理前缀 | `/proxira` |
 | `PROXY_HOST` | 监听地址 | `127.0.0.1` |
-| `PROXY_UPSTREAM_TIMEOUT_MS` | 上游超时（毫秒），超时返回 504 | `30000` |
-| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条非流式正文记录上限 | `2097152` |
+| `PROXY_UPSTREAM_TIMEOUT_MS` | 上游超时（毫秒），只约束「等响应头」，超时返回 504 | `30000` |
+| `PROXY_MAX_BODY_CAPTURE_BYTES` | 单条非流式正文的**采集**上限，`0` = 不限制 | `2097152` |
+| `PROXY_HISTORY_PERSIST_BODY_LIMIT` | 单条正文写入 `history.json` 时的**落盘**上限，`0` = 不裁剪 | `65536` |
+| `PROXY_REQUEST_CONTENT_LENGTH_LIMIT` | 单个请求体硬上限，超出直接返回 `413`（不转发） | `10485760` |
+| `PROXY_STREAM_MAX_CAPTURE_BYTES` | 流式响应采集字节上限，`0` = 不限制 | `0` |
+| `PROXY_STREAM_MAX_CAPTURE_MS` | 流式响应采集时长上限（毫秒），`0` = 不限制 | `0` |
 | `PROXY_HISTORY_LIMIT` | 内存历史上限 | `1000` |
 | `PROXY_ACCESS_TOKEN` | 访问令牌 | — |
 
@@ -224,7 +228,8 @@ proxira migrate-data                   # 把旧版 ./.proxira 迁到统一目录
 
 - **不支持 WebSocket 及其他 HTTP Upgrade 协议**：握手请求返回 `501`，不静默降级。调试 WebSocket 请直连上游。
 - **不做系统代理接管**：只监听自己的端口，需要你手动把请求地址指过去。
-- **正文记录有上限**：超过 `PROXY_MAX_BODY_CAPTURE_BYTES`（默认 2MB）时记录会截断并标记 `truncated`，转发给客户端的响应始终完整。
+- **正文太大只会影响「记录」，不影响转发**：超过 `PROXY_MAX_BODY_CAPTURE_BYTES`（默认 2MB）时记录会被截断并标记 `truncated`，但转发给客户端的响应始终完整；落盘时还会按 `PROXY_HISTORY_PERSIST_BODY_LIMIT`（默认 64KB）再裁一次，所以重启后看到的往往比面板里短。这两个值都支持 `0` = 不限制 —— 需要复盘大报文时设成 `0` 即可，代价是 `history.json` 会跟着变大。
+  - 注意区分：单个**请求体**超过 `PROXY_REQUEST_CONTENT_LENGTH_LIMIT`（默认 10MB）是**硬拒绝**（`413`，请求不会发给上游），不是截断。
 - **流式响应默认全量捕获**：不按长度截断，也不会跑过超时被掐断。
 
 ## 常见问题
