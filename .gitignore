@@ -6,6 +6,7 @@ node_modules/
 dist/
 apps/*/dist/
 apps/getway/dashboard-dist/
+apps/web/.astro/
 *.tsbuildinfo
 
 # Package artifacts

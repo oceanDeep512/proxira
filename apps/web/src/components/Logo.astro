@@ -1,0 +1,64 @@
+---
+/**
+ * 之前的那个 logo：深色圆角方块（箭头 + 光束 + 绿点）+ 旁边的 proxira 字标。
+ * 图形与原来完全一致，唯一区别是字标改成 currentColor —— 原来写死 #0F172A，
+ * 暗色主题下直接和背景糊在一起。
+ * 必须内联：<img> 引用的 SVG 是独立文档，页面的 CSS 进不去，改不了里面的颜色。
+ */
+interface Props {
+  class?: string;
+}
+
+const { class: className = "h-8 w-auto" } = Astro.props;
+---
+
+<svg
+  class:list={["logo-ink", className]}
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 360 88"
+  role="img"
+  aria-label="Proxira"
+>
+  <rect x="8" y="8" width="72" height="72" rx="16" fill="#0F172A"></rect>
+  <path
+    d="M34 27L23 44L34 61"
+    fill="none"
+    stroke="#F8FAFC"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"></path>
+  <path
+    d="M54 27L65 44L54 61"
+    fill="none"
+    stroke="#F8FAFC"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"></path>
+  <path d="M36 35H52" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"></path>
+  <path
+    d="M47 31L52 35L47 39"
+    fill="none"
+    stroke="#38BDF8"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"></path>
+  <path d="M50 53H34" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"></path>
+  <path
+    d="M39 49L34 53L39 57"
+    fill="none"
+    stroke="#38BDF8"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"></path>
+  <circle cx="66" cy="22" r="3" fill="#22C55E"></circle>
+  {/* 字标：颜色跟随主题（见 global.css 的 .logo-ink） */}
+  <text
+    x="96"
+    y="56"
+    fill="currentColor"
+    font-size="38"
+    font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-weight="700"
+    letter-spacing="0.8">proxira</text
+  >
+</svg>

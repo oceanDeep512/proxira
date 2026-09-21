@@ -1,0 +1,588 @@
+/* ==========================================================================
+   Proxira 官网设计系统
+   - 与面板同一套 `--px-*`：同一品牌、同一批色值，官网只是把留白放大
+   - 品牌规范：紫＝观察窗、蓝＝请求光束；中性底约 80%，紫多于蓝
+   - 标志与图形一律纯色平涂，不加投影 / 描边 / 渐变
+   ========================================================================== */
+
+@import "tailwindcss";
+
+/* 字体本地打包，离线可用 */
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme inline {
+  --font-sans: var(--px-font-sans);
+  --font-display: var(--px-font-display);
+  --font-mono: var(--px-font-mono);
+
+  --color-bg: var(--px-bg);
+  --color-bg-soft: var(--px-bg-soft);
+  --color-surface: var(--px-surface);
+  --color-surface-2: var(--px-surface-2);
+  --color-surface-3: var(--px-surface-3);
+  --color-line: var(--px-line);
+  --color-line-strong: var(--px-line-strong);
+  --color-fg: var(--px-text);
+  --color-fg-soft: var(--px-text-soft);
+  --color-fg-dim: var(--px-text-dim);
+
+  --color-accent: var(--px-accent);
+  --color-accent-strong: var(--px-accent-strong);
+  --color-accent-soft: var(--px-accent-soft);
+  --color-accent-fg: var(--px-accent-fg);
+
+  --color-beam: var(--px-beam);
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --breakpoint-panel: 960px;
+}
+
+/* ---- 浅色 --------------------------------------------------------------- */
+:root {
+  --px-font-sans:
+    "Sora Variable", "Sora", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --px-font-display:
+    "Space Grotesk Variable", "Space Grotesk", "PingFang SC", "Noto Sans SC",
+    sans-serif;
+  --px-font-mono:
+    "JetBrains Mono Variable", "JetBrains Mono", "Iosevka", "SFMono-Regular",
+    "Menlo", monospace;
+
+  --px-bg: #eef2f8;
+  --px-bg-soft: #e2e9f3;
+  --px-surface: #ffffff;
+  --px-surface-2: #f4f7fc;
+  --px-surface-3: #eaf0f8;
+  --px-line: #dbe3ef;
+  --px-line-strong: #b6c4d8;
+  --px-text: #101a2b;
+  --px-text-soft: #566b87;
+  --px-text-dim: #5d7189;
+
+  --px-accent: #6d28d9;
+  --px-accent-strong: #5b21b6;
+  --px-accent-soft: rgba(109, 40, 217, 0.1);
+  --px-accent-fg: #ffffff;
+
+  /* 光束蓝：只做点缀（≈8% 面积），永远少于紫 */
+  --px-beam: #0284c7;
+
+  --px-glow-a: rgba(109, 40, 217, 0.16);
+  --px-glow-b: rgba(2, 132, 199, 0.12);
+  --px-grid: rgba(16, 32, 56, 0.07);
+
+  color-scheme: light;
+}
+
+/* ---- 深色 --------------------------------------------------------------- */
+[data-theme="dark"] {
+  --px-bg: #090c12;
+  --px-bg-soft: #0d121b;
+  --px-surface: #111823;
+  --px-surface-2: #161f2c;
+  --px-surface-3: #1d2736;
+  --px-line: #232f41;
+  --px-line-strong: #37475e;
+  --px-text: #e8eef7;
+  --px-text-soft: #94a5bc;
+  --px-text-dim: #7a8ca3;
+
+  --px-accent: #8b5cf6;
+  --px-accent-strong: #a78bfa;
+  --px-accent-soft: rgba(139, 92, 246, 0.18);
+  --px-accent-fg: #120c22;
+
+  --px-beam: #38bdf8;
+
+  --px-glow-a: rgba(139, 92, 246, 0.18);
+  --px-glow-b: rgba(56, 189, 248, 0.1);
+  --px-grid: rgba(148, 165, 188, 0.08);
+
+  color-scheme: dark;
+}
+
+/* ---- 基础层 ------------------------------------------------------------- */
+@layer base {
+  * {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* 顶栏是 sticky 的，锚点跳转要留出它的高度 */
+    scroll-padding-top: 88px;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--px-font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--px-text);
+    background-color: var(--px-bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 背景纵深：双色氛围光 + 细网格，与面板同源 */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background-image:
+      radial-gradient(58rem 34rem at 8% -8%, var(--px-glow-a), transparent 62%),
+      radial-gradient(48rem 30rem at 104% 8%, var(--px-glow-b), transparent 60%),
+      linear-gradient(168deg, var(--px-bg) 0%, var(--px-bg-soft) 100%);
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--px-grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--px-grid) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: radial-gradient(circle at 26% 4%, black 18%, transparent 76%);
+    opacity: 0.7;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    margin: 0;
+    font-family: var(--px-font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: var(--px-font-mono);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--px-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: var(--px-accent-soft);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--px-line-strong) transparent;
+  }
+}
+
+/* ---- 组件层 ------------------------------------------------------------- */
+@layer components {
+  .wrap {
+    width: 100%;
+    max-width: 1120px;
+    margin-inline: auto;
+    padding-inline: 24px;
+  }
+
+  /* 大量留白是刻意的：区块之间 96–128px */
+  .section {
+    padding-block: 96px;
+  }
+
+  .section-sm {
+    padding-block: 64px;
+  }
+
+  .eyebrow {
+    font-family: var(--px-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--px-text-dim);
+  }
+
+  .card {
+    background: var(--px-surface);
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+  }
+
+  .card-hover {
+    transition: border-color 160ms ease, transform 160ms ease;
+  }
+
+  .card-hover:hover {
+    border-color: var(--px-line-strong);
+    transform: translateY(-2px);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 500;
+    border: 1px solid var(--px-line-strong);
+    color: var(--px-text);
+    background: var(--px-surface);
+    transition: border-color 160ms ease, background-color 160ms ease;
+  }
+
+  .btn:hover {
+    border-color: var(--px-accent);
+  }
+
+  .btn-primary {
+    background: var(--px-accent);
+    border-color: var(--px-accent);
+    color: var(--px-accent-fg);
+  }
+
+  .btn-primary:hover {
+    background: var(--px-accent-strong);
+    border-color: var(--px-accent-strong);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--px-line);
+    background: var(--px-surface-2);
+    font-family: var(--px-font-mono);
+    font-size: 11px;
+    color: var(--px-text-soft);
+  }
+
+  /* 终端卡：Hero 主视觉放真实启动横幅 */
+  .term {
+    position: relative;
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-md);
+    background: var(--px-surface-2);
+    overflow: hidden;
+  }
+
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--px-line);
+    background: var(--px-surface-3);
+  }
+
+  .term-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--px-line-strong);
+  }
+
+  .term-body {
+    margin: 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: var(--px-font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--px-text-soft);
+    white-space: pre;
+  }
+
+  /* 命令行：命令 + 复制按钮 */
+  .cmd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-sm);
+    background: var(--px-surface);
+    font-family: var(--px-font-mono);
+    font-size: 13px;
+  }
+
+  .copy-btn {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-xs);
+    background: var(--px-surface-2);
+    color: var(--px-text-dim);
+    font-family: var(--px-font-sans);
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 160ms ease, border-color 160ms ease;
+  }
+
+  .copy-btn:hover {
+    color: var(--px-accent);
+    border-color: var(--px-accent);
+  }
+
+  /* 主题切换图标：由 data-theme 决定显示哪一个，不用 JS 参与 */
+  #theme-toggle [data-icon="sun"] {
+    display: block;
+  }
+
+  #theme-toggle [data-icon="moon"] {
+    display: none;
+  }
+
+  html[data-theme="dark"] #theme-toggle [data-icon="sun"] {
+    display: none;
+  }
+
+  html[data-theme="dark"] #theme-toggle [data-icon="moon"] {
+    display: block;
+  }
+
+  /* ---- 文档正文（guide 页） ------------------------------------------- */
+  .prose {
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--px-text);
+  }
+
+  .prose > :first-child {
+    margin-top: 0;
+  }
+
+  .prose h2 {
+    margin: 56px 0 16px;
+    padding-top: 8px;
+    font-size: 26px;
+    scroll-margin-top: 88px;
+  }
+
+  .prose h3 {
+    margin: 36px 0 12px;
+    font-size: 19px;
+    scroll-margin-top: 88px;
+  }
+
+  .prose p,
+  .prose ul,
+  .prose ol {
+    margin: 0 0 16px;
+    color: var(--px-text-soft);
+  }
+
+  .prose strong {
+    color: var(--px-text);
+    font-weight: 600;
+  }
+
+  .prose ul,
+  .prose ol {
+    padding-left: 22px;
+  }
+
+  .prose li {
+    margin: 0 0 6px;
+  }
+
+  .prose li::marker {
+    color: var(--px-accent);
+  }
+
+  .prose a {
+    color: var(--px-accent-strong);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .prose :not(pre) > code {
+    padding: 0.1em 0.4em;
+    border-radius: var(--radius-xs);
+    background: var(--px-surface-3);
+    font-size: 0.88em;
+    color: var(--px-text);
+  }
+
+  .prose pre {
+    margin: 0 0 20px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  .prose table {
+    width: 100%;
+    margin: 0 0 20px;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--px-line);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    font-size: 14px;
+  }
+
+  .prose thead th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--px-surface-2);
+    border-bottom: 1px solid var(--px-line);
+    font-family: var(--px-font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--px-text-dim);
+    white-space: nowrap;
+  }
+
+  .prose tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--px-line);
+    color: var(--px-text-soft);
+    vertical-align: top;
+  }
+
+  .prose tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .prose blockquote {
+    margin: 0 0 20px;
+    padding: 2px 0 2px 16px;
+    border-left: 3px solid var(--px-accent);
+    color: var(--px-text-soft);
+  }
+
+  /* 窄屏上表格自己横向滚动。
+     坑：给 <table> 设 overflow 是无效的（表格盒子的 overflow 行为特殊），
+     之前直接写 overflow:hidden 反而让整页被撑宽 125px。
+     必须改成块级盒子才吃得下 overflow-x。 */
+  @media (max-width: 720px) {
+    .prose table {
+      display: block;
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .prose thead th {
+      white-space: normal;
+    }
+
+    .prose tbody td {
+      word-break: break-word;
+    }
+  }
+}
+
+/* 目录高亮：写在层外，否则会被 Tailwind 的 text-fg-soft 工具类压过 */
+[data-toc-link].is-active {
+  color: var(--px-accent);
+}
+
+/* logo 字标配色：图形部分（深底方块 + 光束箭头 + 绿点）两套主题通用，不需要换；
+   只有字标要换色 —— 原来在 SVG 里写死 #0F172A，暗色下直接和背景糊在一起。
+   做法是内联 SVG + fill="currentColor"，外层定色：<img> 引的 SVG 是独立文档，
+   页面 CSS 进不去，改不了里面的颜色（这也是不能继续用 <img> 的原因）。 */
+.logo-ink {
+  color: #0f172a;
+}
+
+html[data-theme="dark"] .logo-ink {
+  color: #ffffff;
+}
+
+/* ---- Shiki 双主题：跟随手动切换的 data-theme，而不是系统偏好 ----------
+   先看清 Astro 双主题到底生成了什么（直接看 dist 里的 HTML 最准）：
+     <pre  style="background-color:#fff;--shiki-dark-bg:#22272e;color:#24292e;--shiki-dark:#adbac7">
+     <span style="color:#005CC5;--shiki-dark:#6CB6FF">
+   也就是说：
+   1. light 值被**写死**在 color / background-color 上，Astro 不会生成 --shiki-light* 变量。
+      谁写 var(--shiki-light) 谁踩坑——变量未定义会让整条声明失效，
+      背景直接变透明（这就是上一版浅色代码块「白块消失」的原因）。
+   2. 内联样式压过普通选择器，所以覆盖背景、覆盖暗色字都必须 !important。
+   3. color 用 var(--shiki-dark) 而不是写某个固定色：变量在每个 span 上各自解析成
+      该 token 自己的深色值，语法高亮不会掉成一片单色。
+   4. 背景只给 pre；span 一律 transparent，否则每个 token 各画一块底色。 */
+.astro-code {
+  /* 浅色用站点自己的 surface-2（和首页终端框同一层），不跟 Shiki 的纯白走 */
+  background-color: var(--px-surface-2) !important;
+}
+
+.astro-code span {
+  background-color: transparent !important;
+}
+
+html[data-theme="dark"] .astro-code {
+  color: var(--shiki-dark) !important;
+  background-color: var(--px-surface-2) !important;
+}
+
+html[data-theme="dark"] .astro-code span {
+  color: var(--shiki-dark) !important;
+  background-color: transparent !important;
+}
+
+/* ---- 动效 -------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes px-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.px-animate-in {
+  animation: px-fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (max-width: 640px) {
+  .section {
+    padding-block: 64px;
+  }
+}

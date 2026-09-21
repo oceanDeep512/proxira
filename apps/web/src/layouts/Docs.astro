@@ -1,0 +1,109 @@
+---
+import Base from "./Base.astro";
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  frontmatter: {
+    title: string;
+    description: string;
+    eyebrow?: string;
+  };
+  headings?: Heading[];
+}
+
+const { frontmatter, headings = [] } = Astro.props;
+// 目录只收 h2 / h3：h4 以下是条目级标题，进目录反而更难扫
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<Base title={frontmatter.title} description={frontmatter.description}>
+  <div class="wrap section-sm">
+    <p class="eyebrow">{frontmatter.eyebrow ?? "文档"}</p>
+    <h1 class="mt-3 text-[36px] sm:text-[42px]">{frontmatter.title}</h1>
+    <p class="mt-3 max-w-2xl text-[16px] leading-relaxed text-fg-soft">
+      {frontmatter.description}
+    </p>
+  </div>
+
+  <div
+    class="wrap grid gap-12 pb-24 lg:grid-cols-[212px_minmax(0,1fr)] lg:gap-16"
+  >
+    <aside class="hidden lg:block">
+      <nav
+        id="toc"
+        class="sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2"
+        aria-label="页面目录"
+      >
+        <p class="eyebrow mb-3">本页内容</p>
+        <ul class="space-y-1 text-[14px]">
+          {
+            toc.map((h) => (
+              <li class={h.depth === 3 ? "pl-3" : ""}>
+                <a
+                  href={`#${h.slug}`}
+                  data-toc-link
+                  class="block rounded-xs py-1 text-fg-soft transition-colors duration-150 hover:text-fg"
+                >
+                  {h.text}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+    </aside>
+
+    <article class="prose min-w-0">
+      <slot />
+    </article>
+  </div>
+
+  <script>
+    // 目录高亮。
+    // 坑：不能用 `a.hash === '#' + id` 比较——hash 是 URL 编码后的片段
+    // （#%E5%AE%89%E8%A3%85…），和中文标题的 id 永远对不上。
+    // 改成按实际位置取「最后一个滚过顶栏的标题」，比 IntersectionObserver 更好调。
+    const links = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("[data-toc-link]"),
+    );
+    const slugOf = (a: HTMLAnchorElement) => {
+      try {
+        return decodeURIComponent(a.hash.replace("#", ""));
+      } catch {
+        return a.hash.replace("#", "");
+      }
+    };
+
+    const headings = Array.from(
+      document.querySelectorAll<HTMLElement>(".prose h2[id], .prose h3[id]"),
+    );
+
+    let ticking = false;
+    const update = () => {
+      const line = 120; // 顶栏高度 + 一点余量
+      let active = headings[0]?.id ?? "";
+      for (const h of headings) {
+        if (h.getBoundingClientRect().top <= line) active = h.id;
+      }
+      links.forEach((a) => {
+        a.classList.toggle("is-active", slugOf(a) === active);
+      });
+      ticking = false;
+    };
+
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(update);
+    };
+
+    update();
+    addEventListener("scroll", onScroll, { passive: true });
+    addEventListener("resize", onScroll);
+  </script>
+</Base>

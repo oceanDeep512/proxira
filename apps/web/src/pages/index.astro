@@ -1,0 +1,279 @@
+---
+import Base from "../layouts/Base.astro";
+
+const banner = `╭───────────────────  Proxira  ───────────────────╮
+│ Proxy: http://localhost:3000/proxira            │
+│ Host: 127.0.0.1                                 │
+│ Dashboard: http://localhost:3000/_proxira/ui    │
+│ Target: http://localhost:8080                   │
+│ Data Dir: ~/Library/Application Support/Proxira │
+╰─────────────────────────────────────────────────╯`;
+
+const capabilities = [
+  {
+    title: "透明转发",
+    desc: "Method / Path / Query / Headers / Body 原样送达上游。默认不改任何东西——观测是加分项，不是副作用。",
+  },
+  {
+    title: "实时观测",
+    desc: "SSE 推送，面板实时更新。时间精确到毫秒，支持状态、方法筛选与耗时排序，慢在哪一眼看到。",
+  },
+  {
+    title: "拦截与改写",
+    desc: "请求头分组、Mock 分组、故障注入都在面板里配。命中即生效，业务代码一行不用改。",
+  },
+];
+
+const steps = [
+  {
+    n: "01",
+    title: "装",
+    desc: "不需要安装，也不需要配置文件。",
+    code: "npx proxira",
+  },
+  {
+    n: "02",
+    title: "指",
+    desc: "把联调的请求地址指到代理入口。",
+    code: "http://localhost:3000/proxira",
+  },
+  {
+    n: "03",
+    title: "看",
+    desc: "打开面板，请求会实时进来。",
+    code: "http://localhost:3000/_proxira/ui",
+  },
+];
+
+const notFor = [
+  {
+    label: "不",
+    title: "不支持 WebSocket",
+    desc: "HTTP Upgrade 类协议握手返回 501，不静默降级成普通请求。要调试 WebSocket 请直连上游。",
+  },
+  {
+    label: "不",
+    title: "不接管系统代理",
+    desc: "只监听自己的端口，不会改写系统网络设置——需要你手动把请求地址指过来。",
+  },
+  {
+    label: "不",
+    title: "不解密 HTTPS 上游",
+    desc: "--https 只作用于「客户端到代理」这一段，转发给上游的请求仍是你原来的请求。",
+  },
+  {
+    label: "不",
+    title: "不要暴露到公网",
+    desc: "面板能查看完整请求与响应正文，也能改上游地址。它定位是本地开发调试工具。",
+  },
+];
+
+const advanced = [
+  { title: "HTTPS 调试", desc: "一键生成自签名证书并启用 HTTPS。" },
+  { title: "局域网共享", desc: "--host 开放到局域网，横幅直接给出可发给同事的地址。" },
+  { title: "访问令牌", desc: "--token 保护内部 API 与 SSE，未授权一律 401。" },
+  { title: "重放与差异对比", desc: "改完参数直接重发上游，与原响应逐行 diff。" },
+  { title: "敏感信息脱敏", desc: "authorization / cookie 等默认打码，可一键切回原文。" },
+  { title: "导出与复制", desc: "历史记录导出 JSON，详情一键复制 URL、Headers、Body、cURL。" },
+];
+
+const facts = ["MIT 开源", "Node ≥ 20", "一条命令启动", "面板零配置"];
+---
+
+<Base
+  title="Proxira · 轻量化实时请求代理工具"
+  description="Proxira 是一个面向本地开发联调的代理与观测工具：把请求统一指向本地代理，再用面板实时查看请求、响应、耗时与错误。请求原样转发，全程可见。"
+>
+  <!-- 01 Hero -->
+  <section class="wrap section-sm pt-16 sm:pt-24">
+    <div class="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+      <div>
+        <p class="eyebrow">Transparent proxy, visible.</p>
+        <h1 class="mt-4 text-[38px] leading-[1.15] sm:text-[52px]">
+          把本地发出的请求<br />看得清清楚楚
+        </h1>
+        <p class="mt-5 max-w-xl text-[17px] leading-relaxed text-fg-soft">
+          面向本地开发联调的代理与观测工具。把前端、SDK、脚本的请求统一指向它，
+          再用面板实时查看请求、响应、耗时与错误。
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center gap-3">
+          <div class="cmd w-full max-w-[340px]">
+            <code>npx proxira</code>
+            <button type="button" class="copy-btn" data-copy="npx proxira">
+              复制
+            </button>
+          </div>
+          <a
+            href="https://github.com/oceanDeep512/proxira"
+            target="_blank"
+            rel="noopener"
+            class="btn">GitHub</a
+          >
+        </div>
+      </div>
+
+      <div class="term px-animate-in">
+        <div class="term-bar">
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="ml-2 font-mono text-[11px] text-fg-dim">terminal</span>
+        </div>
+        <pre class="term-body">{banner}</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 事实条 -->
+  <section class="wrap pb-8">
+    <div class="flex flex-wrap gap-2">
+      {facts.map((f) => <span class="chip">{f}</span>)}
+    </div>
+  </section>
+
+  <!-- 03 三大能力 -->
+  <section class="wrap section">
+    <p class="eyebrow">核心能力</p>
+    <h2 class="mt-3 max-w-2xl text-[30px] sm:text-[34px]">
+      它只做三件事，做完就退到一边
+    </h2>
+
+    <div class="mt-10 grid gap-5 md:grid-cols-3">
+      {
+        capabilities.map((c) => (
+          <div class="card card-hover">
+            <h3 class="text-[19px]">{c.title}</h3>
+            <p class="mt-3 text-[15px] leading-relaxed text-fg-soft">{c.desc}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- 04 面板主视觉 -->
+  <section class="wrap section-sm">
+    <div class="overflow-hidden rounded-lg border border-line bg-surface">
+      <img
+        src="/dashboard-overview.webp"
+        alt="Proxira 面板：左侧请求列表，右侧请求详情"
+        width="1600"
+        height="1000"
+        class="block w-full"
+        loading="lazy"
+      />
+    </div>
+
+    <div class="mt-8 grid gap-5 md:grid-cols-3">
+      <div>
+        <p class="eyebrow">左栏</p>
+        <p class="mt-2 text-[15px] leading-relaxed text-fg-soft">
+          请求列表按时间倒序，支持状态、方法筛选与耗时排序。
+        </p>
+      </div>
+      <div>
+        <p class="eyebrow">右栏</p>
+        <p class="mt-2 text-[15px] leading-relaxed text-fg-soft">
+          详情按「时间 → 请求 → 响应 → 来源」的阅读顺序铺开，时间给到毫秒。
+        </p>
+      </div>
+      <div>
+        <p class="eyebrow">新请求提示</p>
+        <p class="mt-2 text-[15px] leading-relaxed text-fg-soft">
+          来了新请求只在底部浮出一条提示，点了才跳，不抢你正在看的那条。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 三步上手 -->
+  <section class="wrap section">
+    <p class="eyebrow">三步上手</p>
+    <h2 class="mt-3 text-[30px] sm:text-[34px]">30 秒跑起来</h2>
+
+    <div class="mt-10 grid gap-5 md:grid-cols-3">
+      {
+        steps.map((s) => (
+          <div class="card">
+            <span class="eyebrow">{s.n}</span>
+            <h3 class="mt-2 text-[19px]">{s.title}</h3>
+            <p class="mt-2 text-[14px] leading-relaxed text-fg-soft">{s.desc}</p>
+            <div class="cmd mt-4">
+              <code class="truncate">{s.code}</code>
+              <button type="button" class="copy-btn" data-copy={s.code}>
+                复制
+              </button>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- 06 它不是什么 -->
+  <section class="wrap section-sm">
+    <div class="card">
+      <p class="eyebrow">先说清楚</p>
+      <h2 class="mt-3 text-[26px] sm:text-[30px]">它不是什么</h2>
+      <p class="mt-3 max-w-2xl text-[15px] leading-relaxed text-fg-soft">
+        把这些写在前面，是因为「为什么抓不到」比「怎么用」更容易浪费时间。
+      </p>
+
+      <div class="mt-8 grid gap-6 sm:grid-cols-2">
+        {
+          notFor.map((n) => (
+            <div class="flex gap-4">
+              <span class="mt-0.5 flex size-7 flex-none items-center justify-center rounded-sm border border-line font-mono text-[12px] text-fg-dim">
+                {n.label}
+              </span>
+              <div>
+                <h3 class="text-[16px]">{n.title}</h3>
+                <p class="mt-1.5 text-[14px] leading-relaxed text-fg-soft">
+                  {n.desc}
+                </p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 进阶能力 -->
+  <section class="wrap section">
+    <p class="eyebrow">进阶</p>
+    <h2 class="mt-3 text-[30px] sm:text-[34px]">用顺手之后，还有这些</h2>
+
+    <div class="mt-10 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
+      {
+        advanced.map((a) => (
+          <div class="bg-surface p-6">
+            <h3 class="text-[16px]">{a.title}</h3>
+            <p class="mt-2 text-[14px] leading-relaxed text-fg-soft">{a.desc}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- 08 收尾 CTA -->
+  <section class="wrap section-sm">
+    <div class="card flex flex-col items-start gap-6 p-8 sm:p-12">
+      <div>
+        <h2 class="text-[28px] sm:text-[32px]">现在就装上看看</h2>
+        <p class="mt-3 max-w-xl text-[15px] leading-relaxed text-fg-soft">
+          不需要注册，不需要配置文件。一条命令，面板就在浏览器里了。
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="cmd w-full max-w-[340px]">
+          <code>npx proxira</code>
+          <button type="button" class="copy-btn" data-copy="npx proxira">
+            复制
+          </button>
+        </div>
+        <a href="/guide" class="btn">读用法</a>
+      </div>
+    </div>
+  </section>
+</Base>

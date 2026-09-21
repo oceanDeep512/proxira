@@ -1,3 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  # 官网：独立 package.json + 独立 lockfile，不参与 workspace。
+  # 这样部署时（EdgeOne 根目录填 apps/web）只装站点自己的依赖，
+  # 不必为了一个静态站把 getway / dashboard 的整棵依赖树也装上。
+  - "!apps/web"
