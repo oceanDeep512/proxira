@@ -43,13 +43,22 @@ type ProxiraState = {
   recordsLoadingMore: boolean;
   selectedRecordId: string | null;
   /**
-   * 「忽略新请求提示」时记下当时的**最新一条 id**。
+   * 「新请求提示」的水位线：**这个 id 及其之前的记录都算已看到**。
    *
-   * 未读条数本身不在这里维护：它是从 `records` + `selectedRecordId` **派生**出来的
-   * （见 NewRecordNotice），所以天然不会算错、也不需要各处重置。
-   * 这里只记「我忽略到哪一条为止」，来了更新的记录提示会自己再冒出来。
+   * 未读条数是派生的：`records` 里排在水位线之前的条数就是新增数
+   * （见 NewRecordNotice）。它和「当前选中哪一条」**无关** —— 这一点很关键，
+   * 早期版本按「选中的是不是最新」来推导，结果看旧记录就冒泡、看新记录就没泡、
+   * 切回旧记录泡又回来了，像是跟着选中项走。
    */
-  dismissedNewestId: string | null;
+  newestSeenId: string | null;
+  /**
+   * 提示条出现的时间戳（ms）；`null` = 当前不显示。
+   *
+   * 单独存一个时间戳，是为了让提示有**自己的生命周期**：出现后由组件计时自动收起，
+   * 而不是一直挂在屏幕上等用户点 X。持续有流量时不重置它，
+   * 否则提示会被无限续命，等于「一直存在」。
+   */
+  noticeShownAt: number | null;
   connectionState: ConnectionState;
   rules: ProxyRule[];
   deletingRecordId: string | null;
@@ -115,8 +124,11 @@ type ProxiraState = {
   moveMockGroup: (groupId: string, direction: "up" | "down") => Promise<void>;
 
   selectRecord: (recordId: string | null) => void;
-  /** 忽略当前的新请求提示（不跳转）；更新的请求进来时会重新出现。 */
-  dismissNewRecords: () => void;
+  /**
+   * 收起新请求提示：把水位线推到当前最新一条，并清掉计时。
+   * 点 X、点「查看最新」、计时到点都走这里。
+   */
+  hideNewRecords: () => void;
   removeRecord: (recordId: string) => Promise<void>;
   exportRecords: (filters: { method: string; status: string }) => Promise<void>;
   clearRecords: () => Promise<void>;
@@ -154,6 +166,25 @@ const withTargetQuery = (path: string, groupId: string): string => {
 
 let eventSource: EventSource | null = null;
 
+/**
+ * 记录列表被整体清空时的状态。提示相关的水位线 / 计时必须一起归零，
+ * 否则清空后水位线指向一条已经不存在的记录，未读数永远算成 0。
+ */
+const emptyRecordsState = (): Pick<
+  ProxiraState,
+  | "records"
+  | "recordsTotal"
+  | "selectedRecordId"
+  | "newestSeenId"
+  | "noticeShownAt"
+> => ({
+  records: [],
+  recordsTotal: 0,
+  selectedRecordId: null,
+  newestSeenId: null,
+  noticeShownAt: null,
+});
+
 export const useProxiraStore = create<ProxiraState>((set, get) => {
   const syncConfig = (config: ProxyConfig): void => {
     const matched =
@@ -183,7 +214,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
   const fetchRecords = async (): Promise<void> => {
     const groupId = selectCurrentTargetId(get());
     if (!groupId) {
-      set({ records: [], recordsTotal: 0, selectedRecordId: null });
+      set(emptyRecordsState());
       return;
     }
 
@@ -191,7 +222,18 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
     if (!response.ok) throw new Error("加载历史记录失败");
 
     const payload = (await response.json()) as ProxyRecordsResponse;
-    set({ records: payload.items, recordsTotal: payload.total });
+    set((state) => {
+      // 整体换列表（切换转发地址 / 重连重拉）后水位线可能已经不在列表里，
+      // 这时顺手归位到最新一条，否则整个历史都会被算成「新请求」。
+      const seenStillThere =
+        state.newestSeenId !== null && payload.items.some((item) => item.id === state.newestSeenId);
+      return {
+        records: payload.items,
+        recordsTotal: payload.total,
+        newestSeenId: seenStillThere ? state.newestSeenId : (payload.items[0]?.id ?? null),
+        noticeShownAt: seenStillThere ? state.noticeShownAt : null,
+      };
+    });
 
     if (payload.items.length === 0) {
       set({ selectedRecordId: null });
@@ -270,11 +312,17 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
         // 「有没有更新」永远是 false，新请求提示一辈子不出现 —— 而盯着面板看
         // 新请求恰恰是最典型的用法。新请求的呈现方式是「底部浮出一条提示，
         // 点它才跳」，所以这里必须让选中留在原地，让「有新请求」这件事可见。
+        //
+        // 提示的计时只在**首次**出现时打点（?? 而不是 =）：持续有流量时若不断重置，
+        // 提示就永远收不起来，又变成「一直存在」。
+        const watchingLatest =
+          state.selectedRecordId === null || state.selectedRecordId === event.record.id;
         return {
           records: [event.record, ...state.records],
           recordsTotal: state.recordsTotal + 1,
           // 列表本来是空的（或刚被清空）时，第一条自动选中，省得对着空详情发呆。
           selectedRecordId: state.selectedRecordId ?? event.record.id,
+          noticeShownAt: watchingLatest ? state.noticeShownAt : (state.noticeShownAt ?? Date.now()),
         };
       });
       return;
@@ -282,17 +330,26 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
 
     if (event.type === "record_deleted") {
       if (event.groupId !== groupId) return;
-      set((state) => ({
-        records: state.records.filter((item) => item.id !== event.id),
-        recordsTotal: Math.max(0, state.recordsTotal - 1),
-        selectedRecordId: state.selectedRecordId === event.id ? null : state.selectedRecordId,
-      }));
+      set((state) => {
+        const records = state.records.filter((item) => item.id !== event.id);
+        // 水位线那条被删掉后就找不到锚点了，重新钉到当前最新一条，
+        // 否则未读数会一直算成 0，提示再也不出现。
+        const watermarkGone = state.newestSeenId === event.id;
+        return {
+          records,
+          recordsTotal: Math.max(0, state.recordsTotal - 1),
+          selectedRecordId: state.selectedRecordId === event.id ? null : state.selectedRecordId,
+          ...(watermarkGone
+            ? { newestSeenId: records[0]?.id ?? null, noticeShownAt: null }
+            : {}),
+        };
+      });
       return;
     }
 
     if (event.type === "records_cleared") {
       if (event.groupId !== groupId) return;
-      set({ records: [], recordsTotal: 0, selectedRecordId: null });
+      set(emptyRecordsState());
     }
   };
 
@@ -321,7 +378,8 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
     recordsTotal: 0,
     recordsLoadingMore: false,
     selectedRecordId: null,
-    dismissedNewestId: null,
+    newestSeenId: null,
+    noticeShownAt: null,
     connectionState: "connecting",
     rules: [],
     deletingRecordId: null,
@@ -713,9 +771,21 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
       }
     },
 
-    selectRecord: (recordId) => set({ selectedRecordId: recordId }),
+    selectRecord: (recordId) =>
+      set((state) => {
+        // 主动切到最新那条 = 已经看到了：提示立刻收起，水位线跟着推进。
+        // 不推进的话，切回旧请求时未读数又 > 0，气泡会「复活」。
+        // 切到别的旧记录则**不动**任何提示状态 —— 气泡不该跟着选中项走。
+        return recordId !== null && state.records[0]?.id === recordId
+          ? { selectedRecordId: recordId, newestSeenId: recordId, noticeShownAt: null }
+          : { selectedRecordId: recordId };
+      }),
 
-    dismissNewRecords: () => set((state) => ({ dismissedNewestId: state.records[0]?.id ?? null })),
+    hideNewRecords: () =>
+      set((state) => ({
+        newestSeenId: state.records[0]?.id ?? null,
+        noticeShownAt: null,
+      })),
 
     removeRecord: async (recordId) => {
       const groupId = selectCurrentTargetId(get());
@@ -727,11 +797,19 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
           { method: "DELETE" },
         );
         if (!response.ok) throw new Error("删除失败");
-        set((state) => ({
-          records: state.records.filter((item) => item.id !== recordId),
-          recordsTotal: Math.max(0, state.recordsTotal - 1),
-          selectedRecordId: state.selectedRecordId === recordId ? null : state.selectedRecordId,
-        }));
+        set((state) => {
+          const records = state.records.filter((item) => item.id !== recordId);
+          // 与 SSE 的 record_deleted 同理：水位线那条被删掉就重新钉到当前最新。
+          const watermarkGone = state.newestSeenId === recordId;
+          return {
+            records,
+            recordsTotal: Math.max(0, state.recordsTotal - 1),
+            selectedRecordId: state.selectedRecordId === recordId ? null : state.selectedRecordId,
+            ...(watermarkGone
+              ? { newestSeenId: records[0]?.id ?? null, noticeShownAt: null }
+              : {}),
+          };
+        });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "删除失败");
       } finally {
@@ -815,7 +893,7 @@ export const useProxiraStore = create<ProxiraState>((set, get) => {
         });
         if (!response.ok) throw new Error("清除历史记录失败");
         const payload = (await response.json()) as { cleared: number };
-        set({ records: [], recordsTotal: 0, selectedRecordId: null });
+        set(emptyRecordsState());
         toast.success(`已清除 ${payload.cleared} 条历史记录`);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "清除历史记录失败");
