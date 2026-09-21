@@ -117,7 +117,10 @@ export const loadRuntimeConfig = (
   // Bodies are re-clipped to this size when written to history.json: full
   // bodies (up to maxBodyCaptureBytes) stay in memory, but the persist file
   // stays bounded instead of growing to hundreds of megabytes.
-  const historyPersistBodyLimitBytes = normalizePositiveInteger(
+  // 0 = 不裁剪（整份捕获正文原样落盘）。⚠️ 这里必须用 normalizeUnboundedInteger：
+  // 用 normalizePositiveInteger 的话 0 会变成 1，用户想「不裁剪」反而把每条正文
+  // 裁成 1 字节，而 shrinkRecordForPersist 里的 `<= 0` 分支永远走不到。
+  const historyPersistBodyLimitBytes = normalizeUnboundedInteger(
     env.PROXY_HISTORY_PERSIST_BODY_LIMIT,
     64 * 1024,
   );
@@ -132,7 +135,8 @@ export const loadRuntimeConfig = (
   // Safety valve against unbounded buffering. Normal API payloads are captured
   // in full; bodies above this are stored as a prefix with `truncated: true`
   // and are still forwarded downstream without clipping.
-  const maxBodyCaptureBytes = normalizePositiveInteger(
+  // 0 = 不限（和流式的两个上限语义保持一致）；非法值与负数回落到默认。
+  const maxBodyCaptureBytes = normalizeUnboundedInteger(
     env.PROXY_MAX_BODY_CAPTURE_BYTES,
     2 * 1024 * 1024,
   );

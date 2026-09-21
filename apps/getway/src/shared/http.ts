@@ -21,6 +21,14 @@ export const REQUEST_STRIP_HEADERS = [
   ...RESPONSE_HOP_BY_HOP_HEADERS,
   "host",
   "content-length",
+  // `Expect: 100-continue` is a per-hop expectation: the client is asking *this*
+  // hop whether it may send the body, and Node's HTTP server already answered
+  // 100 Continue before we ever saw the bytes. Forwarding it hands undici a
+  // handshake it refuses to perform — `new Request` throws UND_ERR_NOT_SUPPORTED
+  // ("expect header not supported") and the whole forward dies as a 502. This
+  // is exactly the shape of a large POST from curl, which adds the header
+  // automatically past ~1KB.
+  "expect",
 ] as const;
 
 const TEXTUAL_MIME_TYPES = new Set([
@@ -261,8 +269,9 @@ export const collectBody = (
   const isBinary = !isTextualContentType(contentType);
   const format = detectBodyFormat(bytes, contentType, isBinary);
 
-  const captured =
-    bytes.length > maxCaptureBytes ? bytes.slice(0, maxCaptureBytes) : bytes;
+  // 0 = 不限（PROXY_MAX_BODY_CAPTURE_BYTES=0），与流式上限同一套语义。
+  const limit = maxCaptureBytes > 0 ? maxCaptureBytes : Number.MAX_SAFE_INTEGER;
+  const captured = bytes.length > limit ? bytes.slice(0, limit) : bytes;
 
   if (isBinary) {
     // Binary payloads cannot be parsed, but the raw bytes are still the only

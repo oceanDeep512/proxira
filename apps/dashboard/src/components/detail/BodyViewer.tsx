@@ -220,9 +220,19 @@ export const BodyViewer = ({
       {view.truncated ? (
         <div className="flex items-start gap-2 rounded-md border border-dashed border-warning/50 bg-warning/10 px-2.5 py-2">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
-          <p className="m-0 text-[12px] leading-snug text-warning">
-            内容存在截断标记，记录大小 {formatBytes(sizeBytes)}；展示的是已捕获的部分。
-          </p>
+          {/* 只说「已截断」没用：用户既不知道是谁截的，也不知道转发会不会受影响。
+              转发链路从来不裁剪，这一点必须写在最显眼的位置。 */}
+          <div className="min-w-0">
+            <p className="m-0 text-[12px] leading-snug text-warning">
+              正文被截断，这里只展示已捕获的部分（实际大小 {formatBytes(sizeBytes)}）。
+              转发不受影响 —— 客户端收到的响应始终是完整的。
+            </p>
+            <p className="m-0 mt-1 text-[11px] leading-snug text-warning/80">
+              上限来自 PROXY_MAX_BODY_CAPTURE_BYTES（采集，默认 2MB）或
+              PROXY_HISTORY_PERSIST_BODY_LIMIT（落盘，默认 64KB，重启后只保留这一段）；
+              两者设为 0 都表示不限制。
+            </p>
+          </div>
         </div>
       ) : null}
 

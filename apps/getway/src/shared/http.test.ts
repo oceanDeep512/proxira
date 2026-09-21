@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { collectBody } from "./http.js";
+import { collectBody, stripHeaders, REQUEST_STRIP_HEADERS } from "./http.js";
 
 const textEncoder = new TextEncoder();
 
@@ -127,5 +127,39 @@ describe("collectBody - binary preview", () => {
     expect(result.text).toBe("a".repeat(10));
     expect(result.truncated).toBe(true);
     expect(result.size).toBe(100);
+  });
+
+  // 0 is the documented "capture everything" value. Regression guard: the env
+  // normalizer used to floor it to 1, which silently turned
+  // PROXY_MAX_BODY_CAPTURE_BYTES=0 into a one-byte capture limit.
+  it("should treat maxCaptureBytes = 0 as unlimited", () => {
+    const bytes = textEncoder.encode("a".repeat(100));
+    const result = collectBody(bytes, "application/octet-stream", 0);
+    expect(result.text).toBe("a".repeat(100));
+    expect(result.truncated).toBe(false);
+    expect(result.size).toBe(100);
+  });
+});
+
+describe("REQUEST_STRIP_HEADERS", () => {
+  // `Expect: 100-continue` must never reach the upstream fetch. Node already
+  // answered the handshake on the client hop, and undici refuses the header
+  // outright (`new Request` throws UND_ERR_NOT_SUPPORTED, "expect header not
+  // supported"), which surfaced as a 502 for every large curl POST.
+  it("should strip expect so undici never sees it", () => {
+    expect(REQUEST_STRIP_HEADERS).toContain("expect");
+
+    const incoming = new Headers({
+      "content-type": "application/json",
+      expect: "100-continue",
+      host: "127.0.0.1:4820",
+      "content-length": "3000000",
+    });
+    const forwarded = stripHeaders(incoming, REQUEST_STRIP_HEADERS);
+
+    expect(forwarded.has("expect")).toBe(false);
+    expect(forwarded.has("host")).toBe(false);
+    expect(forwarded.has("content-length")).toBe(false);
+    expect(forwarded.get("content-type")).toBe("application/json");
   });
 });
