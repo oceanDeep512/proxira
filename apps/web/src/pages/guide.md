@@ -182,6 +182,44 @@ proxira migrate-data                   # 把旧版 ./.proxira 迁到统一目录
 | `PROXY_HISTORY_LIMIT` | 内存历史上限 | `1000` |
 | `PROXY_ACCESS_TOKEN` | 访问令牌 | — |
 
+## 内部管理接口
+
+面板本身就是这些接口的消费者，所以它们对外也是稳定可用的 —— 你可以用脚本改转发地址、灌 Mock 规则、
+拉历史记录，把 Proxira 塞进自己的联调流水线。接口都在 `/_proxira/api/` 下，返回 JSON；
+配了 `--token` 时记得带访问令牌。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/_proxira/api/health` | 健康检查 |
+| `GET` | `/_proxira/api/status` | 服务状态（含 `dataDir` 数据目录） |
+| `GET` | `/_proxira/api/config` | 读取当前配置 |
+| `PUT` | `/_proxira/api/config` | 切换激活转发地址 |
+| `POST` | `/_proxira/api/groups` | 创建转发地址（可带 `headerPresetIds` / `mockGroupIds`） |
+| `PUT` | `/_proxira/api/groups/:id` | 更新转发地址（含生效的请求头分组 / Mock 分组） |
+| `DELETE` | `/_proxira/api/groups/:id` | 删除转发地址 |
+| `GET` | `/_proxira/api/header-presets` | 查询全部请求头分组 |
+| `POST` | `/_proxira/api/header-presets` | 创建请求头分组 |
+| `PUT` | `/_proxira/api/header-presets/:id` | 更新请求头分组（固定头 / 匹配规则 / 名称） |
+| `DELETE` | `/_proxira/api/header-presets/:id` | 删除请求头分组（同时解除各转发地址的引用） |
+| `POST` | `/_proxira/api/header-presets/:id/move` | 调整分组顺序（`direction: up｜down`） |
+| `GET` | `/_proxira/api/mock-groups` | 查询全部 Mock 分组 |
+| `POST` | `/_proxira/api/mock-groups` | 创建 Mock 分组 |
+| `PUT` | `/_proxira/api/mock-groups/:id` | 更新 Mock 分组（名称 / 整组开关 / 规则整表替换） |
+| `DELETE` | `/_proxira/api/mock-groups/:id` | 删除 Mock 分组（同时解除各转发地址的引用） |
+| `POST` | `/_proxira/api/mock-groups/:id/move` | 调整分组顺序（`direction: up｜down`） |
+| `GET` | `/_proxira/api/records` | 查询历史 |
+| `GET` | `/_proxira/api/records/export` | 导出记录 |
+| `DELETE` | `/_proxira/api/records/:id` | 删除单条 |
+| `DELETE` | `/_proxira/api/records` | 清空转发地址历史 |
+| `GET` | `/_proxira/api/rules` | 查询当前转发地址的拦截规则 |
+| `POST` | `/_proxira/api/rules` | 创建拦截规则 |
+| `PUT` | `/_proxira/api/rules/:id` | 更新拦截规则（含启用/停用） |
+| `DELETE` | `/_proxira/api/rules/:id` | 删除拦截规则 |
+| `POST` | `/_proxira/api/replay` | 重放一次请求（不经过规则引擎；`useCustomHeaders: true` 才套用请求头分组） |
+| `GET` | `/_proxira/api/events` | SSE 事件流（面板实时更新靠它） |
+| `POST` | `/_proxira/api/reset` | 重置数据 |
+| `POST` | `/_proxira/api/open-folder` | 在系统文件管理器中打开数据目录 |
+
 ## 能力边界
 
 - **不支持 WebSocket 及其他 HTTP Upgrade 协议**：握手请求返回 `501`，不静默降级。调试 WebSocket 请直连上游。
