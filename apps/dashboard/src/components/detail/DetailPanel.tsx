@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Copy, Maximize2, Minimize2, MousePointerClick, Play } from "lucide-react";
 import type { ProxyTrafficRecord } from "@proxira/core";
 import { parseBody, redactBodyView, resolveContentType } from "../../lib/body";
@@ -82,10 +82,9 @@ export const DetailPanel = ({
     };
   }, [record, showSensitive]);
 
-  // 选中另一条请求时回到「概览」，避免上一条停在 Body / Headers 造成误解。
-  useEffect(() => {
-    setActiveTab("overview");
-  }, [record?.id, setActiveTab]);
+  // 刻意**不**在切换记录时重置 activeTab：正在看「请求 Body」时切下一条，
+  // 通常是想用同一个视角连续对比几条请求，跳回「概览」等于每次都要重点一遍。
+  // tab 是全局状态（useUiStore），所以跨记录保留。
 
   if (!record || !views) {
     return (
