@@ -13,7 +13,7 @@
 
 ```bash
 npx proxira            # 直接跑，不安装（推荐）
-npx proxira@0.4.0      # 固定版本
+npx proxira@0.4.1      # 固定版本
 npm i -g proxira       # 全局安装，之后直接敲 proxira
 ```
 

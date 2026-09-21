@@ -16,7 +16,7 @@ npx proxira
 想固定版本（便于团队复现）或全局安装：
 
 ```bash
-npx proxira@0.4.0
+npx proxira@0.4.1
 npm i -g proxira
 ```
 

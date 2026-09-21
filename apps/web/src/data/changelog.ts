@@ -14,6 +14,35 @@ export interface Release {
 
 export const releases: Release[] = [
   {
+    version: "0.4.1",
+    date: "2026-09-21",
+    summary: "修复大请求转发失败；正文记录的两级上限现在都能关掉。",
+    groups: [
+      {
+        kind: "新增",
+        items: [
+          "官网正式上线（proxira.oceandeep.top）：用法文档、环境变量表、能力边界与更新日志都在这里，仓库和 npm 页只留快速上手",
+        ],
+      },
+      {
+        kind: "变更",
+        items: [
+          "需要复盘大报文时不用再动代码：PROXY_MAX_BODY_CAPTURE_BYTES（采集，默认 2MB）和 PROXY_HISTORY_PERSIST_BODY_LIMIT（落盘，默认 64KB）设成 0 即不限制，代价是 history.json 会跟着变大",
+          "两处 README 精简为「功能概览 + 快速上手」，产品细节统一指向官网，避免三处各写一遍必然漂移",
+        ],
+      },
+      {
+        kind: "修复",
+        items: [
+          "较大的请求体转发直接失败（502）：curl 发送超过约 1KB 的请求体时会自动带上 Expect: 100-continue，这个头被原样转发给上游后触发运行时错误，请求根本没发出去；现在它会在本机这一跳被消化掉",
+          "PROXY_MAX_BODY_CAPTURE_BYTES / PROXY_HISTORY_PERSIST_BODY_LIMIT 设为 0 时失效：0 会被当成 1，本想「不限制」反而把每条正文裁成 1 字节",
+          "新请求提示改为事件驱动并自带寿命，不再跟着当前选中的记录走（此前会出现看旧记录才冒泡、看新记录反而没泡、切回旧记录泡又回来）",
+          "切换请求时不再强制跳回「概览」，保留你正在看的那个详情页签",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.4.0",
     date: "2026-09-21",
     summary: "请求头与 Mock 升级为全局分组模型，新增设置面板。",
